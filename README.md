@@ -17,7 +17,7 @@ Application web complète pour un parcours spirituel personnalisé basé sur la 
 - **Mon Parcours** (exemple): https://3000-ijdjdyk7wwphujd5fn2kw-02b9cc79.sandbox.novita.ai/mon-parcours/1
 - **Admin Dashboard**: https://3000-ijdjdyk7wwphujd5fn2kw-02b9cc79.sandbox.novita.ai/admin
 - **API Health**: https://3000-ijdjdyk7wwphujd5fn2kw-02b9cc79.sandbox.novita.ai/api/hello
-- **Backup Archive**: https://www.genspark.ai/api/files/s/zBwyzSFD (412 KB)
+- **Backup Archive**: https://www.genspark.ai/api/files/s/JNPbGE5d (452 KB)
 
 ---
 
@@ -454,9 +454,10 @@ npx wrangler pages deploy dist --project-name webapp
 - **Hono Framework** : https://hono.dev/
 
 ### Backup
-- **Archive complète** : https://www.genspark.ai/api/files/s/zBwyzSFD
-- **Taille** : 412 KB
-- **Contenu** : Code source, migrations, Git history, configuration
+- **Archive complète** : https://www.genspark.ai/api/files/s/JNPbGE5d
+- **Taille** : 452 KB
+- **Version** : v2.1 Complete Interface
+- **Contenu** : Code source, migrations, Git history, configuration, 11 commits
 
 ---
 
