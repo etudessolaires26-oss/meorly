@@ -4,7 +4,7 @@
 
 Application web complète pour un parcours spirituel personnalisé basé sur la tradition mystique juive (Sefer Raziel, Sefer HaRazin). L'application analyse le manifeste de l'utilisateur et lui attribue automatiquement un Petek, des Psaumes et des Anges protecteurs, avec un rituel quotidien personnalisé.
 
-**Version**: 2.0 Complete  
+**Version**: 2.1 Complete Interface  
 **Date**: 28 décembre 2025  
 **Statut**: ✅ Production Ready
 
@@ -13,8 +13,9 @@ Application web complète pour un parcours spirituel personnalisé basé sur la 
 ## 🚀 URLs d'accès
 
 - **Application principale**: https://3000-ijdjdyk7wwphujd5fn2kw-02b9cc79.sandbox.novita.ai
-- **Admin Dashboard**: https://3000-ijdjdyk7wwphujd5fn2kw-02b9cc79.sandbox.novita.ai/admin
+- **Mon Manifeste** (exemple): https://3000-ijdjdyk7wwphujd5fn2kw-02b9cc79.sandbox.novita.ai/mon-manifeste/1
 - **Mon Parcours** (exemple): https://3000-ijdjdyk7wwphujd5fn2kw-02b9cc79.sandbox.novita.ai/mon-parcours/1
+- **Admin Dashboard**: https://3000-ijdjdyk7wwphujd5fn2kw-02b9cc79.sandbox.novita.ai/admin
 - **API Health**: https://3000-ijdjdyk7wwphujd5fn2kw-02b9cc79.sandbox.novita.ai/api/hello
 - **Backup Archive**: https://www.genspark.ai/api/files/s/zBwyzSFD (412 KB)
 
@@ -60,10 +61,32 @@ Les 24 anges principaux de la tradition mystique juive :
 1. **Landing Page**
    - Design minimaliste et spirituel
    - Formulaire d'inscription avec validation
+   - Redirection automatique vers le formulaire de manifeste
    - Sections: Vérité, Approche, Parcours, Bienfaits, Limites
    - Responsive et accessible
 
-2. **API Backend (11 routes)**
+2. **Interface "Mon Manifeste"** (`/mon-manifeste/:id`)
+   - Formulaire guidé de soumission du manifeste spirituel
+   - Sélection du thème principal (paix, amour, réussite, santé, protection, sagesse)
+   - Zone de texte libre pour décrire la situation
+   - Questions optionnelles (situation actuelle, aspirations)
+   - Analyse automatique à la soumission
+   - Redirection vers le parcours personnalisé
+
+3. **Interface "Mon Parcours"** (`/mon-parcours/:id`)
+   - Affichage du Petek personnalisé avec intention et lecture complète
+   - Psaumes complets Louis Segond avec textes intégraux
+   - Anges protecteurs avec descriptions et qualités
+   - **Rituel quotidien personnalisé en 5 étapes**:
+     1. Préparation et purification (2 min)
+     2. Lecture du Petek (5-7 min)
+     3. Récitation du Psaume principal (5 min)
+     4. Invocation de l'Ange protecteur (3 min)
+     5. Clôture et gratitude (2 min)
+   - Durée totale calculée automatiquement
+   - Design spirituel et apaisant avec gradient violet
+
+4. **API Backend (11 routes)**
    - `POST /api/manifeste` - Soumission du manifeste utilisateur
    - `POST /api/analyze-manifeste` - Analyse automatique et attribution
    - `GET /api/user/:id/petek` - Récupération du Petek personnalisé
@@ -76,18 +99,18 @@ Les 24 anges principaux de la tradition mystique juive :
    - `GET /api/inscriptions` - Liste inscriptions (admin)
    - `GET /api/hello` - Health check
 
-3. **Base de Données D1**
+2. **API Backend (11 routes)**
    - 9 tables structurées avec relations
    - Migrations complètes et appliquées
    - Index optimisés pour les performances
    - Foreign keys et contraintes
 
-4. **Admin Dashboard**
+3. **Base de Données D1**
    - Liste des inscriptions avec filtres
    - Statistiques (total, en attente, contactés)
    - Lien direct vers le parcours de chaque utilisateur
 
-5. **Interface "Mon Parcours"**
+4. **Admin Dashboard**
    - Affichage du Petek personnalisé avec intention et lecture
    - Psaumes complets Louis Segond avec textes intégraux
    - Anges protecteurs avec descriptions
@@ -100,7 +123,7 @@ Les 24 anges principaux de la tradition mystique juive :
    - Durée totale calculée automatiquement
    - Design spirituel et apaisant
 
-6. **Logique d'Attribution Intelligente**
+5. **Logique d'Attribution Intelligente**
    - Analyse des mots-clés du manifeste
    - Attribution automatique Petek/Psaumes/Anges
    - Basée sur les tags et thèmes
@@ -211,7 +234,32 @@ curl http://localhost:3000/api/angels
 
 ## 📖 Exemple d'utilisation
 
-### Parcours utilisateur type
+### Workflow utilisateur complet
+
+**Étape 1 : Inscription** (Page d'accueil `/`)
+- L'utilisateur remplit le formulaire d'inscription (prénom, nom, email, téléphone, objectif)
+- Validation des données et création du compte
+- Redirection automatique vers `/mon-manifeste/:id` (après 3 secondes)
+
+**Étape 2 : Manifeste spirituel** (`/mon-manifeste/:id`)
+- L'utilisateur décrit sa situation et ses aspirations
+- Choix du thème principal (paix, amour, réussite, etc.)
+- Soumission du manifeste
+- Analyse automatique en arrière-plan
+- Redirection vers `/mon-parcours/:id` (après 2 secondes)
+
+**Étape 3 : Découverte du parcours** (`/mon-parcours/:id`)
+- Affichage du Petek personnalisé avec intention et pratique
+- Psaumes complets Louis Segond avec texte intégral
+- Anges protecteurs avec descriptions et invocations
+- Rituel quotidien personnalisé en 5 étapes avec durée totale
+- Consultation illimitée de la page
+
+**Durée totale du parcours d'inscription** : ~5-10 minutes
+
+---
+
+### Parcours utilisateur type (API)
 
 **1. Inscription**
 ```bash
@@ -347,15 +395,17 @@ npx wrangler pages deploy dist --project-name webapp
 
 ### Commits Git
 ```
-9 commits au total:
+10 commits au total:
 - 7cd2ceb: Initial commit
 - 5a926c1: Application complète (landing + API + DB)
 - 2585be8: Page admin
 - 8d7db25: Guide de démarrage
+- f9d1f67: Ajout des 300 Peteks + 30 Psaumes + 24 Anges
 - b64a391: Routes API avec 300 Peteks
 - be27a59: Corrections routes API
 - 4ef9015: Import 150 Psaumes Louis Segond
 - 603a8cf: Interface Mon Parcours + Rituel
+- 6630478: Interface formulaire manifeste + workflow complet
 ```
 
 ---
@@ -411,6 +461,15 @@ npx wrangler pages deploy dist --project-name webapp
 ---
 
 ## 📝 Changelog
+
+### v2.1 Complete Interface (28 décembre 2025)
+- ✅ **Interface complète "Mon Manifeste"** - Formulaire guidé avec validation
+- ✅ **Workflow automatisé** - Inscription → Manifeste → Parcours
+- ✅ **Redirection intelligente** - Guidage automatique de l'utilisateur
+- ✅ **Analyse en temps réel** - Attribution automatique à la soumission
+- ✅ **Rituel personnalisé** - Généré dynamiquement selon le profil
+- ✅ **Design spirituel** - Interface apaisante avec palette violet/noir
+- ✅ **UX fluide** - Messages de succès et transitions
 
 ### v2.0 Complete (28 décembre 2025)
 - ✅ Import complet des 150 Psaumes Louis Segond 1910
