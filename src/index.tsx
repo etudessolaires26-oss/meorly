@@ -330,6 +330,282 @@ async function sendEmail(
 
 // =============================================
 // API ROUTES
+
+// =============================================
+// MESSAGING API
+// =============================================
+
+// POST /api/messages/send - Envoyer un message
+app.post('/api/messages/send', async (c) => {
+  const { env } = c;
+  
+  try {
+    const body = await c.req.json();
+    const { sender_id, recipient_id, inscription_id, content } = body;
+
+    if (!sender_id || !recipient_id || !content) {
+      return c.json({ 
+        success: false, 
+        error: 'sender_id, recipient_id et content requis' 
+      }, 400);
+    }
+
+    // Vérifier que les utilisateurs existent
+    const sender = await env.DB.prepare(
+      'SELECT id, role FROM users WHERE id = ?'
+    ).bind(sender_id).first();
+
+    const recipient = await env.DB.prepare(
+      'SELECT id, role FROM users WHERE id = ?'
+    ).bind(recipient_id).first();
+
+    if (!sender || !recipient) {
+      return c.json({ 
+        success: false, 
+        error: 'Utilisateur introuvable' 
+      }, 404);
+    }
+
+    // Insérer le message
+    const result = await env.DB.prepare(`
+      INSERT INTO messages (sender_id, recipient_id, inscription_id, content)
+      VALUES (?, ?, ?, ?)
+    `).bind(sender_id, recipient_id, inscription_id, content).run();
+
+    return c.json({ 
+      success: true, 
+      message_id: result.meta.last_row_id,
+      message: 'Message envoyé'
+    });
+
+  } catch (error) {
+    console.error('Erreur send message:', error);
+    return c.json({ success: false, error: 'Erreur serveur' }, 500);
+  }
+});
+
+// GET /api/messages/conversation/:user1_id/:user2_id - Récupérer une conversation
+app.get('/api/messages/conversation/:user1_id/:user2_id', async (c) => {
+  const { env } = c;
+  
+  try {
+    const user1_id = parseInt(c.req.param('user1_id'));
+    const user2_id = parseInt(c.req.param('user2_id'));
+
+    if (!user1_id || !user2_id) {
+      return c.json({ 
+        success: false, 
+        error: 'IDs utilisateurs requis' 
+      }, 400);
+    }
+
+    // Récupérer tous les messages entre ces 2 utilisateurs
+    const messages = await env.DB.prepare(`
+      SELECT 
+        m.id,
+        m.sender_id,
+        m.recipient_id,
+        m.content,
+        m.is_read,
+        m.created_at,
+        u1.email as sender_email,
+        u2.email as recipient_email
+      FROM messages m
+      JOIN users u1 ON m.sender_id = u1.id
+      JOIN users u2 ON m.recipient_id = u2.id
+      WHERE (m.sender_id = ? AND m.recipient_id = ?)
+         OR (m.sender_id = ? AND m.recipient_id = ?)
+      ORDER BY m.created_at ASC
+    `).bind(user1_id, user2_id, user2_id, user1_id).all();
+
+    return c.json({ 
+      success: true, 
+      messages: messages.results || []
+    });
+
+  } catch (error) {
+    console.error('Erreur get conversation:', error);
+    return c.json({ success: false, error: 'Erreur serveur' }, 500);
+  }
+});
+
+// GET /api/messages/unread/:user_id - Nombre de messages non lus
+app.get('/api/messages/unread/:user_id', async (c) => {
+  const { env } = c;
+  
+  try {
+    const user_id = parseInt(c.req.param('user_id'));
+
+    if (!user_id) {
+      return c.json({ 
+        success: false, 
+        error: 'user_id requis' 
+      }, 400);
+    }
+
+    const result = await env.DB.prepare(`
+      SELECT COUNT(*) as unread_count
+      FROM messages
+      WHERE recipient_id = ? AND is_read = 0
+    `).bind(user_id).first();
+
+    return c.json({ 
+      success: true, 
+      unread_count: result.unread_count || 0
+    });
+
+  } catch (error) {
+    console.error('Erreur get unread:', error);
+    return c.json({ success: false, error: 'Erreur serveur' }, 500);
+  }
+});
+
+// POST /api/messages/mark-read - Marquer messages comme lus
+app.post('/api/messages/mark-read', async (c) => {
+  const { env } = c;
+  
+  try {
+    const body = await c.req.json();
+    const { user_id, sender_id } = body;
+
+    if (!user_id || !sender_id) {
+      return c.json({ 
+        success: false, 
+        error: 'user_id et sender_id requis' 
+      }, 400);
+    }
+
+    // Marquer tous les messages de sender_id vers user_id comme lus
+    await env.DB.prepare(`
+      UPDATE messages 
+      SET is_read = 1, read_at = datetime('now')
+      WHERE recipient_id = ? AND sender_id = ? AND is_read = 0
+    `).bind(user_id, sender_id).run();
+
+    return c.json({ 
+      success: true, 
+      message: 'Messages marqués comme lus'
+    });
+
+  } catch (error) {
+    console.error('Erreur mark read:', error);
+    return c.json({ success: false, error: 'Erreur serveur' }, 500);
+  }
+});
+
+// GET /api/messages/conversations/:user_id - Liste des conversations d'un utilisateur
+app.get('/api/messages/conversations/:user_id', async (c) => {
+  const { env } = c;
+  
+  try {
+    const user_id = parseInt(c.req.param('user_id'));
+
+    if (!user_id) {
+      return c.json({ 
+        success: false, 
+        error: 'user_id requis' 
+      }, 400);
+    }
+
+    // Récupérer toutes les conversations avec infos utilisateurs
+    const conversations = await env.DB.prepare(`
+      SELECT DISTINCT
+        CASE 
+          WHEN m.sender_id = ? THEN m.recipient_id 
+          ELSE m.sender_id 
+        END AS other_user_id,
+        u.email AS other_user_email,
+        i.prenom,
+        i.nom,
+        m.inscription_id,
+        (SELECT content FROM messages m2 
+         WHERE (m2.sender_id = ? AND m2.recipient_id = other_user_id)
+            OR (m2.sender_id = other_user_id AND m2.recipient_id = ?)
+         ORDER BY m2.created_at DESC LIMIT 1) AS last_message,
+        (SELECT created_at FROM messages m2 
+         WHERE (m2.sender_id = ? AND m2.recipient_id = other_user_id)
+            OR (m2.sender_id = other_user_id AND m2.recipient_id = ?)
+         ORDER BY m2.created_at DESC LIMIT 1) AS last_message_at,
+        (SELECT COUNT(*) FROM messages m2 
+         WHERE m2.recipient_id = ? AND m2.sender_id = other_user_id AND m2.is_read = 0) AS unread_count
+      FROM messages m
+      JOIN users u ON u.id = CASE WHEN m.sender_id = ? THEN m.recipient_id ELSE m.sender_id END
+      LEFT JOIN inscriptions i ON m.inscription_id = i.id
+      WHERE m.sender_id = ? OR m.recipient_id = ?
+      ORDER BY last_message_at DESC
+    `).bind(
+      user_id, user_id, user_id, user_id, user_id, user_id, user_id, user_id, user_id
+    ).all();
+
+    return c.json({ 
+      success: true, 
+      conversations: conversations.results || []
+    });
+
+  } catch (error) {
+    console.error('Erreur get conversations:', error);
+    return c.json({ success: false, error: 'Erreur serveur' }, 500);
+  }
+});
+
+// SSE endpoint pour notifications temps réel
+app.get('/api/messages/stream/:user_id', async (c) => {
+  const user_id = parseInt(c.req.param('user_id'));
+  
+  if (!user_id) {
+    return c.text('user_id requis', 400);
+  }
+
+  // Configuration SSE
+  const stream = new ReadableStream({
+    async start(controller) {
+      const encoder = new TextEncoder();
+      
+      // Fonction pour envoyer un événement
+      const sendEvent = (data: any) => {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+      };
+
+      // Envoyer un ping initial
+      sendEvent({ type: 'connected', user_id });
+
+      // Polling toutes les 5 secondes pour vérifier nouveaux messages
+      const intervalId = setInterval(async () => {
+        try {
+          const { env } = c;
+          const result = await env.DB.prepare(`
+            SELECT COUNT(*) as unread_count
+            FROM messages
+            WHERE recipient_id = ? AND is_read = 0
+          `).bind(user_id).first();
+
+          sendEvent({ 
+            type: 'unread_update', 
+            unread_count: result.unread_count || 0 
+          });
+
+        } catch (error) {
+          console.error('SSE error:', error);
+        }
+      }, 5000);
+
+      // Nettoyage quand la connexion se ferme
+      setTimeout(() => {
+        clearInterval(intervalId);
+        controller.close();
+      }, 300000); // 5 minutes max
+    }
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive'
+    }
+  });
+});
+
 // =============================================
 
 // POST /api/manifeste - Soumettre un manifeste
@@ -1709,6 +1985,7 @@ app.get('/admin', async (c) => {
         <p class="subtitle">Gestion des inscriptions et validation des paiements</p>
       </div>
       <div>
+        <a href="/admin/messages" class="btn" style="background: #667eea; margin-right: 10px;">💬 Messagerie</a>
         <a href="/" class="btn">← Accueil</a>
         <a href="/login" class="btn" style="background: #4caf50;">Déconnexion</a>
       </div>
@@ -2022,6 +2299,426 @@ app.get('/admin', async (c) => {
 // =============================================
 
 // Route: Page d'inscription simplifiée
+
+// Page Admin Messagerie
+app.get('/admin/messages', async (c) => {
+  const { env } = c;
+  
+  try {
+    // ID admin (supposé être 1)
+    const adminId = 1;
+    
+    // Récupérer toutes les conversations
+    const conversations = await env.DB.prepare(`
+      SELECT DISTINCT
+        i.id as inscription_id,
+        i.prenom,
+        i.nom,
+        i.email,
+        u.id as user_id,
+        (SELECT COUNT(*) FROM messages m2 
+         WHERE m2.recipient_id = ? AND m2.sender_id = u.id AND m2.is_read = 0) AS unread_count,
+        (SELECT content FROM messages m2 
+         WHERE (m2.sender_id = ? AND m2.recipient_id = u.id)
+            OR (m2.sender_id = u.id AND m2.recipient_id = ?)
+         ORDER BY m2.created_at DESC LIMIT 1) AS last_message,
+        (SELECT created_at FROM messages m2 
+         WHERE (m2.sender_id = ? AND m2.recipient_id = u.id)
+            OR (m2.sender_id = u.id AND m2.recipient_id = ?)
+         ORDER BY m2.created_at DESC LIMIT 1) AS last_message_at
+      FROM inscriptions i
+      JOIN users u ON i.user_id = u.id
+      WHERE i.user_id IS NOT NULL
+        AND EXISTS (
+          SELECT 1 FROM messages m
+          WHERE (m.sender_id = u.id AND m.recipient_id = ?)
+             OR (m.sender_id = ? AND m.recipient_id = u.id)
+        )
+      ORDER BY last_message_at DESC
+    `).bind(adminId, adminId, adminId, adminId, adminId, adminId, adminId).all();
+
+    const convos = conversations.results || [];
+
+    return c.html(`<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Messagerie Admin - Académie de la Lumière</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Inter, system-ui, sans-serif;
+      background: #0a0a0f;
+      color: #f0f0f2;
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+    
+    /* Sidebar conversations */
+    .sidebar {
+      width: 320px;
+      background: #16213e;
+      border-right: 1px solid rgba(255,255,255,0.1);
+      display: flex;
+      flex-direction: column;
+    }
+    .sidebar-header {
+      padding: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+    .sidebar-header h2 {
+      font-size: 18px;
+      margin-bottom: 4px;
+    }
+    .sidebar-header p {
+      font-size: 13px;
+      opacity: 0.8;
+    }
+    .conversations-list {
+      flex: 1;
+      overflow-y: auto;
+    }
+    .conversation-item {
+      padding: 15px 20px;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .conversation-item:hover {
+      background: rgba(255,255,255,0.02);
+    }
+    .conversation-item.active {
+      background: rgba(102,126,234,0.15);
+      border-left: 3px solid #667eea;
+    }
+    .conversation-name {
+      font-weight: 600;
+      font-size: 14px;
+      margin-bottom: 4px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .conversation-email {
+      font-size: 12px;
+      color: #8f88a3;
+      margin-bottom: 6px;
+    }
+    .conversation-preview {
+      font-size: 13px;
+      color: #b8aec9;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .unread-badge {
+      background: #e74c3c;
+      color: white;
+      border-radius: 10px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: bold;
+    }
+    
+    /* Chat area */
+    .chat-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: #0a0a0f;
+    }
+    .chat-header {
+      padding: 20px;
+      background: #16213e;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .chat-header-info h3 {
+      font-size: 16px;
+      margin-bottom: 4px;
+    }
+    .chat-header-info p {
+      font-size: 13px;
+      color: #8f88a3;
+    }
+    .chat-messages {
+      flex: 1;
+      padding: 20px;
+      overflow-y: auto;
+    }
+    .message {
+      margin-bottom: 15px;
+      display: flex;
+      gap: 12px;
+    }
+    .message.me {
+      flex-direction: row-reverse;
+    }
+    .message-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .message-content {
+      max-width: 60%;
+    }
+    .message-bubble {
+      padding: 12px 16px;
+      border-radius: 16px;
+      background: rgba(255,255,255,0.08);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .message.me .message-bubble {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+    .message-time {
+      font-size: 11px;
+      color: #8f88a3;
+      margin-top: 4px;
+      padding: 0 4px;
+    }
+    .chat-input-area {
+      padding: 20px;
+      background: #16213e;
+      border-top: 1px solid rgba(255,255,255,0.1);
+    }
+    .chat-input-form {
+      display: flex;
+      gap: 12px;
+    }
+    .chat-input {
+      flex: 1;
+      padding: 12px 16px;
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 24px;
+      background: #0a0a0f;
+      color: white;
+      font-size: 14px;
+      outline: none;
+    }
+    .chat-input:focus {
+      border-color: #667eea;
+    }
+    .send-button {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 24px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+    .send-button:hover {
+      transform: scale(1.05);
+    }
+    .empty-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #8f88a3;
+    }
+    .empty-state-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+    .btn-back {
+      display: inline-block;
+      padding: 8px 16px;
+      background: rgba(255,255,255,0.1);
+      color: white;
+      text-decoration: none;
+      border-radius: 8px;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <h2>💬 Messagerie</h2>
+      <p>${convos.length} conversation(s)</p>
+    </div>
+    <div class="conversations-list" id="conversations-list">
+      ${convos.length > 0 ? convos.map((convo, index) => `
+        <div class="conversation-item ${index === 0 ? 'active' : ''}" 
+             onclick="selectConversation(${convo.user_id}, '${convo.prenom} ${convo.nom}', '${convo.email}', ${convo.inscription_id})">
+          <div class="conversation-name">
+            <span>${convo.prenom} ${convo.nom}</span>
+            ${convo.unread_count > 0 ? `<span class="unread-badge">${convo.unread_count}</span>` : ''}
+          </div>
+          <div class="conversation-email">${convo.email}</div>
+          <div class="conversation-preview">${convo.last_message || 'Pas de messages'}</div>
+        </div>
+      `).join('') : '<div style="padding: 20px; text-align: center; color: #8f88a3;">Aucune conversation</div>'}
+    </div>
+    <div style="padding: 15px; border-top: 1px solid rgba(255,255,255,0.1);">
+      <a href="/admin" class="btn-back">← Retour au dashboard</a>
+    </div>
+  </div>
+
+  <!-- Chat Area -->
+  <div class="chat-area">
+    ${convos.length > 0 ? `
+      <div class="chat-header">
+        <div class="chat-header-info">
+          <h3 id="chat-user-name">${convos[0].prenom} ${convos[0].nom}</h3>
+          <p id="chat-user-email">${convos[0].email}</p>
+        </div>
+      </div>
+      <div class="chat-messages" id="chat-messages">
+        <!-- Messages chargés dynamiquement -->
+      </div>
+      <div class="chat-input-area">
+        <form class="chat-input-form" id="chat-form">
+          <input type="text" class="chat-input" id="message-input" placeholder="Tapez votre message..." required>
+          <input type="hidden" id="current-user-id" value="${convos[0].user_id}">
+          <input type="hidden" id="current-inscription-id" value="${convos[0].inscription_id}">
+          <button type="submit" class="send-button">Envoyer →</button>
+        </form>
+      </div>
+    ` : `
+      <div class="empty-state">
+        <div class="empty-state-icon">💬</div>
+        <p>Aucune conversation disponible</p>
+        <p style="font-size: 13px; margin-top: 8px;">Les conversations apparaîtront ici quand les clients vous enverront des messages.</p>
+      </div>
+    `}
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
+  <script>
+    const adminId = 1;
+    let currentUserId = ${convos.length > 0 ? convos[0].user_id : 'null'};
+    let currentInscriptionId = ${convos.length > 0 ? convos[0].inscription_id : 'null'};
+
+    // Charger les messages au démarrage
+    if (currentUserId) {
+      loadMessages(currentUserId);
+      // Refresh toutes les 5 secondes
+      setInterval(() => loadMessages(currentUserId), 5000);
+    }
+
+    // Sélectionner une conversation
+    function selectConversation(userId, name, email, inscriptionId) {
+      currentUserId = userId;
+      currentInscriptionId = inscriptionId;
+      
+      document.getElementById('chat-user-name').textContent = name;
+      document.getElementById('chat-user-email').textContent = email;
+      document.getElementById('current-user-id').value = userId;
+      document.getElementById('current-inscription-id').value = inscriptionId;
+      
+      // Mise à jour UI active
+      document.querySelectorAll('.conversation-item').forEach(item => {
+        item.classList.remove('active');
+      });
+      event.currentTarget.classList.add('active');
+      
+      loadMessages(userId);
+    }
+
+    // Charger les messages
+    async function loadMessages(userId) {
+      try {
+        const response = await axios.get(\`/api/messages/conversation/\${adminId}/\${userId}\`);
+        
+        if (response.data.success) {
+          const messagesDiv = document.getElementById('chat-messages');
+          messagesDiv.innerHTML = '';
+          
+          response.data.messages.forEach(msg => {
+            addMessageToUI(msg.sender_id === adminId, msg.content, msg.created_at);
+          });
+          
+          messagesDiv.scrollTop = messagesDiv.scrollHeight;
+          
+          // Marquer comme lus
+          await axios.post('/api/messages/mark-read', {
+            user_id: adminId,
+            sender_id: userId
+          });
+        }
+      } catch (error) {
+        console.error('Erreur chargement:', error);
+      }
+    }
+
+    // Ajouter un message à l'UI
+    function addMessageToUI(isMe, content, timestamp) {
+      const messagesDiv = document.getElementById('chat-messages');
+      const messageDiv = document.createElement('div');
+      messageDiv.className = 'message' + (isMe ? ' me' : '');
+      
+      const time = new Date(timestamp).toLocaleTimeString('fr-FR', { 
+        hour: '2-digit', 
+        minute: '2-digit' 
+      });
+      
+      messageDiv.innerHTML = \`
+        <div class="message-avatar">\${isMe ? '👤' : '🧑'}</div>
+        <div class="message-content">
+          <div class="message-bubble">\${content}</div>
+          <div class="message-time">\${time}</div>
+        </div>
+      \`;
+      
+      messagesDiv.appendChild(messageDiv);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    // Envoyer un message
+    document.getElementById('chat-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const input = document.getElementById('message-input');
+      const content = input.value.trim();
+      
+      if (!content || !currentUserId) return;
+      
+      try {
+        const response = await axios.post('/api/messages/send', {
+          sender_id: adminId,
+          recipient_id: currentUserId,
+          inscription_id: currentInscriptionId,
+          content: content
+        });
+        
+        if (response.data.success) {
+          addMessageToUI(true, content, new Date().toISOString());
+          input.value = '';
+        }
+      } catch (error) {
+        console.error('Erreur envoi:', error);
+        alert('Erreur lors de l\\'envoi');
+      }
+    });
+  </script>
+</body>
+</html>`);
+
+  } catch (error) {
+    console.error('Erreur admin messages:', error);
+    return c.text('Erreur serveur', 500);
+  }
+});
+
 app.get('/inscription', (c) => {
   return c.html(`<!DOCTYPE html>
 <html lang="fr">
@@ -4068,6 +4765,299 @@ app.get('/mon-parcours/:inscription_id', async (c) => {
       <a href="/" class="btn">← Retour à l'accueil</a>
     </div>
   </div>
+
+  <!-- Chat Widget Flottant -->
+  <div id="chat-widget" style="position: fixed; bottom: 20px; right: 20px; z-index: 1000;">
+    <!-- Bouton chat -->
+    <button id="chat-button" onclick="toggleChat()" style="
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border: none;
+      color: white;
+      font-size: 24px;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      transition: transform 0.2s;
+      position: relative;
+    ">
+      💬
+      <span id="unread-badge" style="
+        position: absolute;
+        top: -5px;
+        right: -5px;
+        background: #e74c3c;
+        color: white;
+        border-radius: 10px;
+        padding: 2px 6px;
+        font-size: 11px;
+        font-weight: bold;
+        display: none;
+      ">0</span>
+    </button>
+
+    <!-- Fenêtre de chat -->
+    <div id="chat-window" style="
+      display: none;
+      position: absolute;
+      bottom: 80px;
+      right: 0;
+      width: 350px;
+      max-height: 500px;
+      background: #1a1a2e;
+      border-radius: 12px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      border: 1px solid rgba(255,255,255,0.1);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    ">
+      <!-- En-tête -->
+      <div style="
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 15px;
+        color: white;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      ">
+        <div>
+          <div style="font-weight: 600;">💬 Chat avec votre guide</div>
+          <div style="font-size: 12px; opacity: 0.8;">En ligne</div>
+        </div>
+        <button onclick="toggleChat()" style="
+          background: none;
+          border: none;
+          color: white;
+          font-size: 20px;
+          cursor: pointer;
+          padding: 0;
+          width: 30px;
+          height: 30px;
+        ">×</button>
+      </div>
+
+      <!-- Messages -->
+      <div id="chat-messages" style="
+        flex: 1;
+        overflow-y: auto;
+        padding: 15px;
+        background: #16213e;
+        max-height: 350px;
+      ">
+        <div style="text-align: center; color: #8f88a3; font-size: 13px; margin-bottom: 15px;">
+          Début de la conversation
+        </div>
+      </div>
+
+      <!-- Zone de saisie -->
+      <div style="padding: 15px; background: #1a1a2e; border-top: 1px solid rgba(255,255,255,0.1);">
+        <form id="chat-form" style="display: flex; gap: 8px;">
+          <input 
+            type="text" 
+            id="chat-input" 
+            placeholder="Votre message..."
+            style="
+              flex: 1;
+              padding: 10px;
+              border: 1px solid rgba(255,255,255,0.2);
+              border-radius: 8px;
+              background: #0f1422;
+              color: white;
+              font-size: 14px;
+            "
+            required
+          />
+          <button type="submit" style="
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+          ">➤</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
+  <script>
+    const inscriptionId = ${inscription_id};
+    const userId = ${inscription.user_id || 'null'};
+    let chatOpen = false;
+    let eventSource = null;
+
+    function toggleChat() {
+      chatOpen = !chatOpen;
+      const chatWindow = document.getElementById('chat-window');
+      chatWindow.style.display = chatOpen ? 'flex' : 'none';
+      
+      if (chatOpen) {
+        loadMessages();
+        connectSSE();
+      } else {
+        if (eventSource) {
+          eventSource.close();
+          eventSource = null;
+        }
+      }
+    }
+
+    // Charger l'historique des messages
+    async function loadMessages() {
+      if (!userId) return;
+      
+      try {
+        // Récupérer le guide assigné (on suppose qu'il y a un guide par défaut ID=1)
+        const guideId = 1; // TODO: récupérer le vrai guide_id depuis inscription
+        
+        const response = await axios.get(\`/api/messages/conversation/\${userId}/\${guideId}\`);
+        
+        if (response.data.success) {
+          const messagesDiv = document.getElementById('chat-messages');
+          messagesDiv.innerHTML = '<div style="text-align: center; color: #8f88a3; font-size: 13px; margin-bottom: 15px;">Début de la conversation</div>';
+          
+          response.data.messages.forEach(msg => {
+            addMessageToUI(msg.content, msg.sender_id === userId, msg.created_at);
+          });
+          
+          // Scroll to bottom
+          messagesDiv.scrollTop = messagesDiv.scrollHeight;
+          
+          // Marquer messages comme lus
+          if (response.data.messages.length > 0) {
+            await axios.post('/api/messages/mark-read', {
+              user_id: userId,
+              sender_id: guideId
+            });
+            updateUnreadBadge(0);
+          }
+        }
+      } catch (error) {
+        console.error('Erreur chargement messages:', error);
+      }
+    }
+
+    // Ajouter un message à l'UI
+    function addMessageToUI(content, isMe, timestamp) {
+      const messagesDiv = document.getElementById('chat-messages');
+      const messageDiv = document.createElement('div');
+      messageDiv.style.cssText = \`
+        margin-bottom: 12px;
+        display: flex;
+        justify-content: \${isMe ? 'flex-end' : 'flex-start'};
+      \`;
+      
+      const bubble = document.createElement('div');
+      bubble.style.cssText = \`
+        max-width: 70%;
+        padding: 10px 14px;
+        border-radius: 12px;
+        background: \${isMe ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : 'rgba(255,255,255,0.08)'};
+        color: white;
+        font-size: 14px;
+        word-wrap: break-word;
+      \`;
+      bubble.textContent = content;
+      
+      messageDiv.appendChild(bubble);
+      messagesDiv.appendChild(messageDiv);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    // Envoyer un message
+    document.getElementById('chat-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      if (!userId) {
+        alert('Vous devez être connecté pour envoyer des messages');
+        return;
+      }
+      
+      const input = document.getElementById('chat-input');
+      const content = input.value.trim();
+      
+      if (!content) return;
+      
+      try {
+        const guideId = 1; // TODO: récupérer le vrai guide_id
+        
+        const response = await axios.post('/api/messages/send', {
+          sender_id: userId,
+          recipient_id: guideId,
+          inscription_id: inscriptionId,
+          content: content
+        });
+        
+        if (response.data.success) {
+          addMessageToUI(content, true, new Date().toISOString());
+          input.value = '';
+        } else {
+          alert('Erreur lors de l\\'envoi: ' + response.data.error);
+        }
+      } catch (error) {
+        console.error('Erreur envoi message:', error);
+        alert('Erreur lors de l\\'envoi du message');
+      }
+    });
+
+    // Connexion SSE pour notifications temps réel
+    function connectSSE() {
+      if (!userId || eventSource) return;
+      
+      eventSource = new EventSource(\`/api/messages/stream/\${userId}\`);
+      
+      eventSource.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        
+        if (data.type === 'unread_update') {
+          if (!chatOpen && data.unread_count > 0) {
+            updateUnreadBadge(data.unread_count);
+            // Recharger messages si le chat est ouvert
+            if (chatOpen) {
+              loadMessages();
+            }
+          }
+        }
+      };
+      
+      eventSource.onerror = (error) => {
+        console.error('SSE error:', error);
+        eventSource.close();
+        eventSource = null;
+        // Retry après 5 secondes
+        setTimeout(connectSSE, 5000);
+      };
+    }
+
+    // Mettre à jour le badge de messages non lus
+    function updateUnreadBadge(count) {
+      const badge = document.getElementById('unread-badge');
+      if (count > 0) {
+        badge.textContent = count;
+        badge.style.display = 'block';
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+
+    // Charger le nombre de messages non lus au chargement
+    if (userId) {
+      axios.get(\`/api/messages/unread/\${userId}\`)
+        .then(response => {
+          if (response.data.success) {
+            updateUnreadBadge(response.data.unread_count);
+          }
+        })
+        .catch(console.error);
+      
+      // Connecter SSE
+      connectSSE();
+    }
+  </script>
 </body>
 </html>`);
 
