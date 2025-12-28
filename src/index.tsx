@@ -782,6 +782,7 @@ app.get('/admin', async (c) => {
           <th>Objectif</th>
           <th>Date</th>
           <th>Status</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -794,6 +795,7 @@ app.get('/admin', async (c) => {
             <td>${r.objectif || '-'}</td>
             <td>${new Date(r.created_at).toLocaleDateString('fr-FR')}</td>
             <td><span class="status status-${r.status}">${r.status}</span></td>
+            <td><a href="/mon-parcours/${r.id}" class="btn" style="font-size: 12px; padding: 6px 12px;">Voir parcours</a></td>
           </tr>
         `).join('')}
       </tbody>
@@ -806,6 +808,426 @@ app.get('/admin', async (c) => {
     return c.html('<h1>Erreur lors du chargement des données</h1>')
   }
 })
+
+// Route: Mon Parcours Spirituel (affichage du Petek, Psaumes, Anges et Rituel)
+app.get('/mon-parcours/:inscription_id', async (c) => {
+  const { env } = c;
+  const inscription_id = c.req.param('inscription_id');
+  
+  try {
+    // Récupérer toutes les données utilisateur
+    const inscription = await env.DB.prepare(`
+      SELECT * FROM inscriptions WHERE id = ?
+    `).bind(inscription_id).first();
+
+    if (!inscription) {
+      return c.text('Utilisateur non trouvé', 404);
+    }
+
+    // Récupérer le Petek
+    const petekResult = await env.DB.prepare(`
+      SELECT 
+        up.*,
+        pt.code, pt.theme, pt.theme_label,
+        pt.intent_fr, pt.reading_fr,
+        pt.practice, pt.guide_comment_fr,
+        pt.duration_recommended, pt.cycle_days
+      FROM user_peteks up
+      JOIN petek_templates pt ON up.petek_template_id = pt.id
+      WHERE up.inscription_id = ? AND up.status = 'active'
+      ORDER BY up.assigned_at DESC
+      LIMIT 1
+    `).bind(inscription_id).first();
+
+    // Récupérer les Psaumes
+    const psalmsResult = await env.DB.prepare(`
+      SELECT 
+        p.number, p.title_fr, p.full_text_fr, p.theme, p.duration_min, p.guide_comment
+      FROM user_psalms up
+      JOIN psalms p ON up.psalm_id = p.id
+      WHERE up.inscription_id = ? AND up.status = 'active'
+      ORDER BY up.assigned_at DESC
+      LIMIT 3
+    `).bind(inscription_id).all();
+
+    // Récupérer les Anges
+    const angelsResult = await env.DB.prepare(`
+      SELECT 
+        a.slug, a.name_fr, a.name_he, a.description_fr,
+        ua.rank_assigned
+      FROM user_angels ua
+      JOIN angels a ON ua.angel_id = a.id
+      WHERE ua.inscription_id = ?
+      ORDER BY ua.rank_assigned ASC
+    `).bind(inscription_id).all();
+
+    const petek = petekResult || null;
+    const psalms = psalmsResult.results || [];
+    const angels = angelsResult.results || [];
+
+    return c.html(`<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mon Parcours Spirituel - ${inscription.prenom} ${inscription.nom}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0a0a0f;
+      --text: #f0f0f2;
+      --muted: #b8aec9;
+      --muted2: #8f88a3;
+      --accent: #b388eb;
+      --line: rgba(255,255,255,.08);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Inter, system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 40px 20px;
+      line-height: 1.6;
+    }
+    .container { max-width: 900px; margin: 0 auto; }
+    
+    .header {
+      text-align: center;
+      margin-bottom: 50px;
+      padding-bottom: 30px;
+      border-bottom: 1px solid var(--line);
+    }
+    .header h1 {
+      font-size: 32px;
+      margin-bottom: 8px;
+      color: var(--accent);
+    }
+    .header .subtitle {
+      color: var(--muted2);
+      font-size: 14px;
+    }
+
+    .section {
+      background: rgba(255,255,255,.02);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 30px;
+      margin-bottom: 30px;
+    }
+    .section-title {
+      font-size: 22px;
+      color: var(--accent);
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .section-title .icon {
+      font-size: 24px;
+    }
+
+    .petek-card {
+      background: rgba(179,136,235,.1);
+      border: 2px solid rgba(179,136,235,.3);
+      border-radius: 12px;
+      padding: 25px;
+      margin-bottom: 20px;
+    }
+    .petek-code {
+      font-size: 14px;
+      color: var(--muted2);
+      margin-bottom: 10px;
+    }
+    .petek-intent {
+      font-size: 18px;
+      line-height: 1.6;
+      margin-bottom: 15px;
+      color: var(--text);
+    }
+    .petek-reading {
+      font-style: italic;
+      color: var(--muted);
+      padding: 15px;
+      background: rgba(0,0,0,.2);
+      border-radius: 8px;
+      border-left: 3px solid var(--accent);
+    }
+    .petek-meta {
+      display: flex;
+      gap: 20px;
+      margin-top: 15px;
+      font-size: 14px;
+      color: var(--muted2);
+    }
+
+    .psalm-item {
+      border-left: 3px solid var(--accent);
+      padding-left: 20px;
+      margin-bottom: 25px;
+    }
+    .psalm-number {
+      font-size: 14px;
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .psalm-title {
+      font-size: 16px;
+      font-weight: 600;
+      margin: 5px 0 10px;
+    }
+    .psalm-text {
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.8;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    .angel-item {
+      display: flex;
+      gap: 15px;
+      padding: 20px;
+      background: rgba(255,255,255,.03);
+      border-radius: 10px;
+      margin-bottom: 15px;
+    }
+    .angel-rank {
+      font-size: 24px;
+      font-weight: 600;
+      color: var(--accent);
+      min-width: 30px;
+    }
+    .angel-info h3 {
+      font-size: 18px;
+      margin-bottom: 5px;
+    }
+    .angel-info .angel-hebrew {
+      font-size: 14px;
+      color: var(--muted2);
+      margin-bottom: 10px;
+    }
+    .angel-info .angel-desc {
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .ritual-box {
+      background: linear-gradient(135deg, rgba(179,136,235,.15), rgba(179,136,235,.05));
+      border: 2px solid rgba(179,136,235,.3);
+      border-radius: 12px;
+      padding: 30px;
+    }
+    .ritual-step {
+      display: flex;
+      gap: 15px;
+      margin-bottom: 20px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--line);
+    }
+    .ritual-step:last-child {
+      border-bottom: none;
+      margin-bottom: 0;
+    }
+    .ritual-number {
+      min-width: 35px;
+      height: 35px;
+      background: var(--accent);
+      color: #0a0a0f;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 16px;
+      flex-shrink: 0;
+    }
+    .ritual-content h4 {
+      font-size: 16px;
+      margin-bottom: 8px;
+    }
+    .ritual-content p {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .ritual-time {
+      display: inline-block;
+      padding: 4px 10px;
+      background: rgba(179,136,235,.2);
+      border-radius: 20px;
+      font-size: 12px;
+      color: var(--accent);
+      margin-top: 8px;
+    }
+
+    .btn {
+      display: inline-block;
+      padding: 12px 24px;
+      background: var(--accent);
+      color: #0a0a0f;
+      border-radius: 10px;
+      text-decoration: none;
+      font-weight: 600;
+      transition: all 0.3s ease;
+    }
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 20px rgba(179,136,235,.4);
+    }
+
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f8f9ff;
+        --text: #17151f;
+        --muted: #4b4460;
+        --muted2: #6a6180;
+        --accent: #7a42e4;
+        --line: rgba(10,10,20,.12);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>✦ Mon Parcours Spirituel</h1>
+      <p class="subtitle">${inscription.prenom} ${inscription.nom} • Objectif: ${inscription.objectif || 'Non défini'}</p>
+    </div>
+
+    ${petek ? `
+    <div class="section">
+      <div class="section-title">
+        <span class="icon">📜</span>
+        <span>Votre Petek Personnel</span>
+      </div>
+      <div class="petek-card">
+        <div class="petek-code">${petek.code} • ${petek.theme_label}</div>
+        <div class="petek-intent">${petek.intent_fr}</div>
+        <div class="petek-reading">"${petek.reading_fr}"</div>
+        <div class="petek-meta">
+          <span>⏱ Durée: ${petek.duration_recommended} min/jour</span>
+          <span>🔄 Cycle: ${petek.cycle_days} jours</span>
+        </div>
+      </div>
+      ${petek.guide_comment_fr ? `<p style="color: var(--muted); margin-top: 15px;"><strong>Note du guide:</strong> ${petek.guide_comment_fr}</p>` : ''}
+    </div>
+    ` : '<div class="section"><p style="color: var(--muted);">Aucun Petek attribué pour le moment.</p></div>'}
+
+    ${psalms.length > 0 ? `
+    <div class="section">
+      <div class="section-title">
+        <span class="icon">📖</span>
+        <span>Vos Psaumes (Louis Segond 1910)</span>
+      </div>
+      ${psalms.map(psalm => `
+        <div class="psalm-item">
+          <div class="psalm-number">Psaume ${psalm.number}</div>
+          <div class="psalm-title">${psalm.title_fr}</div>
+          <div class="psalm-text">${psalm.full_text_fr || 'Texte complet à venir...'}</div>
+          ${psalm.guide_comment ? `<p style="color: var(--muted2); font-size: 13px; margin-top: 10px;"><em>${psalm.guide_comment}</em></p>` : ''}
+        </div>
+      `).join('')}
+    </div>
+    ` : ''}
+
+    ${angels.length > 0 ? `
+    <div class="section">
+      <div class="section-title">
+        <span class="icon">👼</span>
+        <span>Vos Anges Protecteurs</span>
+      </div>
+      ${angels.map(angel => `
+        <div class="angel-item">
+          <div class="angel-rank">${angel.rank_assigned === 1 ? '👑' : '⭐'}</div>
+          <div class="angel-info">
+            <h3>${angel.name_fr}</h3>
+            <div class="angel-hebrew">${angel.name_he}</div>
+            <div class="angel-desc">${angel.description_fr}</div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+    ` : ''}
+
+    <div class="section">
+      <div class="section-title">
+        <span class="icon">🕯</span>
+        <span>Votre Rituel Quotidien Personnalisé</span>
+      </div>
+      <div class="ritual-box">
+        <div class="ritual-step">
+          <div class="ritual-number">1</div>
+          <div class="ritual-content">
+            <h4>Préparation (Matin)</h4>
+            <p>Installez-vous dans un endroit calme. Prenez 3 respirations profondes pour vous recentrer.</p>
+            <span class="ritual-time">⏱ 2 minutes</span>
+          </div>
+        </div>
+
+        ${petek ? `
+        <div class="ritual-step">
+          <div class="ritual-number">2</div>
+          <div class="ritual-content">
+            <h4>Lecture de votre Petek</h4>
+            <p>Lisez votre Petek (${petek.code}) en vous concentrant sur l'intention : <em>"${petek.reading_fr}"</em></p>
+            <span class="ritual-time">⏱ ${petek.duration_recommended} minutes</span>
+          </div>
+        </div>
+        ` : ''}
+
+        ${psalms.length > 0 ? `
+        <div class="ritual-step">
+          <div class="ritual-number">3</div>
+          <div class="ritual-content">
+            <h4>Récitation du Psaume ${psalms[0].number}</h4>
+            <p>Récitez le Psaume ${psalms[0].number} "${psalms[0].title_fr}" à voix haute ou mentalement. Laissez les mots résonner en vous.</p>
+            <span class="ritual-time">⏱ ${psalms[0].duration_min || 5} minutes</span>
+          </div>
+        </div>
+        ` : ''}
+
+        ${angels.length > 0 ? `
+        <div class="ritual-step">
+          <div class="ritual-number">4</div>
+          <div class="ritual-content">
+            <h4>Invocation de ${angels[0].name_fr}</h4>
+            <p>Invoquez ${angels[0].name_fr} (${angels[0].name_he}) pour ${angels[0].description_fr.toLowerCase()}. Formulez votre demande avec clarté et respect.</p>
+            <span class="ritual-time">⏱ 3 minutes</span>
+          </div>
+        </div>
+        ` : ''}
+
+        <div class="ritual-step">
+          <div class="ritual-number">5</div>
+          <div class="ritual-content">
+            <h4>Clôture et Gratitude</h4>
+            <p>Terminez par un moment de silence et de gratitude. Notez dans un carnet vos ressentis ou insights.</p>
+            <span class="ritual-time">⏱ 2 minutes</span>
+          </div>
+        </div>
+
+        <div style="margin-top: 25px; padding-top: 20px; border-top: 1px solid var(--line);">
+          <p style="color: var(--muted); font-size: 14px;">
+            <strong>⏰ Durée totale:</strong> ${(petek?.duration_recommended || 5) + (psalms[0]?.duration_min || 5) + 10} minutes par jour<br>
+            <strong>📅 Fréquence:</strong> Quotidienne pendant ${petek?.cycle_days || 21} jours<br>
+            <strong>💡 Conseil:</strong> Pratiquez de préférence le matin au réveil ou le soir avant de dormir.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align: center; margin-top: 40px;">
+      <a href="/" class="btn">← Retour à l'accueil</a>
+    </div>
+  </div>
+</body>
+</html>`);
+
+  } catch (error) {
+    console.error('Erreur mon-parcours:', error);
+    return c.html('<h1>Erreur lors du chargement de votre parcours</h1><p>Veuillez réessayer plus tard.</p>');
+  }
+});
 
 // Main landing page
 app.get('/', (c) => {
