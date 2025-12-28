@@ -332,6 +332,120 @@ async function sendEmail(
 // API ROUTES
 
 // =============================================
+
+// =============================================
+// BLACKLIST MANAGEMENT API
+// =============================================
+
+// POST /api/admin/blacklist/add - Ajouter à la blacklist
+app.post('/api/admin/blacklist/add', async (c) => {
+  const { env } = c;
+  
+  try {
+    const body = await c.req.json();
+    const { email, tel, raison, admin_id } = body;
+
+    if ((!email && !tel) || !raison || !admin_id) {
+      return c.json({ 
+        success: false, 
+        error: 'Email ou téléphone, raison et admin_id requis' 
+      }, 400);
+    }
+
+    // Vérifier si déjà dans la blacklist
+    const existing = await env.DB.prepare(`
+      SELECT id FROM blacklist 
+      WHERE (email = ? OR tel = ?)
+    `).bind(email || '', tel || '').first();
+
+    if (existing) {
+      return c.json({ 
+        success: false, 
+        error: 'Cette entrée existe déjà dans la blacklist' 
+      }, 400);
+    }
+
+    // Ajouter à la blacklist
+    const result = await env.DB.prepare(`
+      INSERT INTO blacklist (email, tel, raison, blacklisted_by)
+      VALUES (?, ?, ?, ?)
+    `).bind(email || null, tel || null, raison, admin_id).run();
+
+    console.log(`✅ Ajouté à la blacklist: ${email || tel} par admin ${admin_id}`);
+
+    return c.json({ 
+      success: true, 
+      message: 'Ajouté à la blacklist avec succès',
+      blacklist_id: result.meta.last_row_id
+    });
+
+  } catch (error) {
+    console.error('Erreur add blacklist:', error);
+    return c.json({ success: false, error: 'Erreur serveur' }, 500);
+  }
+});
+
+// DELETE /api/admin/blacklist/remove/:id - Retirer de la blacklist
+app.delete('/api/admin/blacklist/remove/:id', async (c) => {
+  const { env } = c;
+  
+  try {
+    const id = parseInt(c.req.param('id'));
+
+    if (!id) {
+      return c.json({ 
+        success: false, 
+        error: 'ID requis' 
+      }, 400);
+    }
+
+    // Supprimer de la blacklist
+    await env.DB.prepare(`
+      DELETE FROM blacklist WHERE id = ?
+    `).bind(id).run();
+
+    console.log(`✅ Retiré de la blacklist: ID ${id}`);
+
+    return c.json({ 
+      success: true, 
+      message: 'Retiré de la blacklist avec succès'
+    });
+
+  } catch (error) {
+    console.error('Erreur remove blacklist:', error);
+    return c.json({ success: false, error: 'Erreur serveur' }, 500);
+  }
+});
+
+// GET /api/admin/blacklist/list - Liste complète de la blacklist
+app.get('/api/admin/blacklist/list', async (c) => {
+  const { env } = c;
+  
+  try {
+    const blacklist = await env.DB.prepare(`
+      SELECT 
+        b.id,
+        b.email,
+        b.tel,
+        b.raison,
+        b.created_at,
+        u.email as admin_email
+      FROM blacklist b
+      LEFT JOIN users u ON b.blacklisted_by = u.id
+      ORDER BY b.created_at DESC
+    `).all();
+
+    return c.json({ 
+      success: true, 
+      blacklist: blacklist.results || []
+    });
+
+  } catch (error) {
+    console.error('Erreur list blacklist:', error);
+    return c.json({ success: false, error: 'Erreur serveur' }, 500);
+  }
+});
+
 // MESSAGING API
 // =============================================
 
@@ -1986,6 +2100,7 @@ app.get('/admin', async (c) => {
       </div>
       <div>
         <a href="/admin/messages" class="btn" style="background: #667eea; margin-right: 10px;">💬 Messagerie</a>
+        <a href="/admin/blacklist" class="btn" style="background: #e74c3c; margin-right: 10px;">🚫 Blacklist</a>
         <a href="/" class="btn">← Accueil</a>
         <a href="/login" class="btn" style="background: #4caf50;">Déconnexion</a>
       </div>
@@ -2718,6 +2833,410 @@ app.get('/admin/messages', async (c) => {
     return c.text('Erreur serveur', 500);
   }
 });
+
+// Page Admin Blacklist
+app.get('/admin/blacklist', async (c) => {
+  const { env } = c;
+  
+  try {
+    // Récupérer toute la blacklist
+    const blacklist = await env.DB.prepare(`
+      SELECT 
+        b.id,
+        b.email,
+        b.tel,
+        b.raison,
+        b.created_at,
+        u.email as admin_email
+      FROM blacklist b
+      LEFT JOIN users u ON b.blacklisted_by = u.id
+      ORDER BY b.created_at DESC
+    `).all();
+
+    const entries = blacklist.results || [];
+
+    return c.html(`<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gestion Blacklist - Académie de la Lumière</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Inter, system-ui, sans-serif;
+      background: #0a0a0f;
+      color: #f0f0f2;
+      padding: 40px 20px;
+      line-height: 1.6;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+    
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 40px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    .header h1 {
+      font-size: 28px;
+      color: #b388eb;
+    }
+    .header .subtitle {
+      color: #8f88a3;
+      font-size: 14px;
+      margin-top: 4px;
+    }
+    
+    .btn {
+      display: inline-block;
+      padding: 10px 20px;
+      background: #667eea;
+      color: white;
+      text-decoration: none;
+      border-radius: 8px;
+      font-size: 14px;
+      border: none;
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+    .btn:hover { transform: scale(1.05); }
+    .btn-danger {
+      background: #e74c3c;
+      padding: 6px 12px;
+      font-size: 13px;
+    }
+    .btn-success {
+      background: #27ae60;
+    }
+    
+    .add-section {
+      background: rgba(255,255,255,0.02);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 30px;
+    }
+    .add-section h2 {
+      font-size: 18px;
+      margin-bottom: 20px;
+      color: #b388eb;
+    }
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 15px;
+      margin-bottom: 15px;
+    }
+    .form-group {
+      margin-bottom: 15px;
+    }
+    .form-group label {
+      display: block;
+      margin-bottom: 6px;
+      color: #b8aec9;
+      font-size: 14px;
+    }
+    .form-group input,
+    .form-group textarea {
+      width: 100%;
+      padding: 10px 14px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 8px;
+      color: white;
+      font-size: 14px;
+    }
+    .form-group textarea {
+      min-height: 80px;
+      resize: vertical;
+    }
+    .form-group input:focus,
+    .form-group textarea:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+    
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+    .stat-card {
+      background: rgba(255,255,255,0.02);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 12px;
+      padding: 20px;
+      text-align: center;
+    }
+    .stat-value {
+      font-size: 32px;
+      font-weight: 600;
+      color: #b388eb;
+      margin-bottom: 4px;
+    }
+    .stat-label {
+      font-size: 14px;
+      color: #8f88a3;
+    }
+    
+    .blacklist-table {
+      background: rgba(255,255,255,0.02);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .blacklist-table h2 {
+      padding: 20px;
+      background: rgba(255,255,255,0.03);
+      font-size: 18px;
+      color: #b388eb;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th {
+      background: rgba(255,255,255,0.03);
+      padding: 12px 16px;
+      text-align: left;
+      font-size: 13px;
+      color: #b8aec9;
+      font-weight: 600;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    td {
+      padding: 14px 16px;
+      font-size: 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    tr:hover {
+      background: rgba(255,255,255,0.02);
+    }
+    .empty-state {
+      padding: 60px 20px;
+      text-align: center;
+      color: #8f88a3;
+    }
+    .empty-state-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+    
+    .message {
+      padding: 12px 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      font-size: 14px;
+      display: none;
+    }
+    .message.success {
+      background: rgba(39, 174, 96, 0.2);
+      border: 1px solid #27ae60;
+      color: #2ecc71;
+    }
+    .message.error {
+      background: rgba(231, 76, 60, 0.2);
+      border: 1px solid #e74c3c;
+      color: #e74c3c;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div>
+        <h1>🚫 Gestion de la Blacklist</h1>
+        <p class="subtitle">Bloquer et débloquer des emails/téléphones</p>
+      </div>
+      <div>
+        <a href="/admin" class="btn">← Retour Dashboard</a>
+      </div>
+    </div>
+
+    <div id="message" class="message"></div>
+
+    <!-- Stats -->
+    <div class="stats">
+      <div class="stat-card">
+        <div class="stat-value">${entries.length}</div>
+        <div class="stat-label">Total blacklistés</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${entries.filter(e => e.email).length}</div>
+        <div class="stat-label">Emails bloqués</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${entries.filter(e => e.tel).length}</div>
+        <div class="stat-label">Téléphones bloqués</div>
+      </div>
+    </div>
+
+    <!-- Formulaire d'ajout -->
+    <div class="add-section">
+      <h2>➕ Ajouter à la blacklist</h2>
+      <form id="add-form">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Email à bloquer</label>
+            <input type="email" name="email" id="email" placeholder="exemple@email.com">
+          </div>
+          <div class="form-group">
+            <label>Téléphone à bloquer</label>
+            <input type="tel" name="tel" id="tel" placeholder="+33612345678">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Raison du blocage *</label>
+          <textarea name="raison" id="raison" required placeholder="Ex: Spam répété, comportement inapproprié, tentative de fraude..."></textarea>
+        </div>
+        <p style="font-size: 13px; color: #8f88a3; margin-bottom: 12px;">
+          ⚠️ Au moins un email OU un téléphone doit être renseigné
+        </p>
+        <button type="submit" class="btn btn-success">Ajouter à la blacklist</button>
+      </form>
+    </div>
+
+    <!-- Liste blacklist -->
+    <div class="blacklist-table">
+      <h2>📋 Liste des entrées blacklistées</h2>
+      ${entries.length > 0 ? `
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Email</th>
+              <th>Téléphone</th>
+              <th>Raison</th>
+              <th>Ajouté par</th>
+              <th>Date</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="blacklist-tbody">
+            ${entries.map(entry => {
+              const date = new Date(entry.created_at).toLocaleDateString('fr-FR');
+              return `
+                <tr data-id="${entry.id}">
+                  <td><strong>#${entry.id}</strong></td>
+                  <td>${entry.email || '<span style="color: #8f88a3;">—</span>'}</td>
+                  <td>${entry.tel || '<span style="color: #8f88a3;">—</span>'}</td>
+                  <td style="max-width: 300px;">${entry.raison}</td>
+                  <td>${entry.admin_email || '<span style="color: #8f88a3;">Inconnu</span>'}</td>
+                  <td>${date}</td>
+                  <td>
+                    <button onclick="removeFromBlacklist(${entry.id})" class="btn btn-danger">
+                      🗑️ Retirer
+                    </button>
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      ` : `
+        <div class="empty-state">
+          <div class="empty-state-icon">✅</div>
+          <p>Aucune entrée dans la blacklist</p>
+          <p style="font-size: 13px; margin-top: 8px;">Utilisez le formulaire ci-dessus pour ajouter des emails ou téléphones à bloquer.</p>
+        </div>
+      `}
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
+  <script>
+    const adminId = 1; // TODO: récupérer du session
+
+    // Afficher message
+    function showMessage(text, type) {
+      const messageDiv = document.getElementById('message');
+      messageDiv.textContent = text;
+      messageDiv.className = 'message ' + type;
+      messageDiv.style.display = 'block';
+      
+      setTimeout(() => {
+        messageDiv.style.display = 'none';
+      }, 5000);
+    }
+
+    // Ajouter à la blacklist
+    document.getElementById('add-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const email = document.getElementById('email').value.trim();
+      const tel = document.getElementById('tel').value.trim();
+      const raison = document.getElementById('raison').value.trim();
+      
+      if (!email && !tel) {
+        showMessage('Veuillez renseigner au moins un email ou un téléphone', 'error');
+        return;
+      }
+      
+      if (!raison) {
+        showMessage('La raison est obligatoire', 'error');
+        return;
+      }
+      
+      try {
+        const response = await axios.post('/api/admin/blacklist/add', {
+          email: email || null,
+          tel: tel || null,
+          raison: raison,
+          admin_id: adminId
+        });
+        
+        if (response.data.success) {
+          showMessage('✅ Ajouté à la blacklist avec succès !', 'success');
+          setTimeout(() => location.reload(), 1500);
+        } else {
+          showMessage('❌ ' + response.data.error, 'error');
+        }
+      } catch (error) {
+        console.error('Erreur:', error);
+        showMessage('❌ Erreur lors de l\'ajout', 'error');
+      }
+    });
+
+    // Retirer de la blacklist
+    async function removeFromBlacklist(id) {
+      if (!confirm('Êtes-vous sûr de vouloir retirer cette entrée de la blacklist ?')) {
+        return;
+      }
+      
+      try {
+        const response = await axios.delete(\`/api/admin/blacklist/remove/\${id}\`);
+        
+        if (response.data.success) {
+          showMessage('✅ Retiré de la blacklist avec succès !', 'success');
+          // Retirer la ligne du tableau
+          document.querySelector(\`tr[data-id="\${id}"]\`).remove();
+          
+          // Recharger après 1 seconde pour update les stats
+          setTimeout(() => location.reload(), 1000);
+        } else {
+          showMessage('❌ ' + response.data.error, 'error');
+        }
+      } catch (error) {
+        console.error('Erreur:', error);
+        showMessage('❌ Erreur lors de la suppression', 'error');
+      }
+    }
+  </script>
+</body>
+</html>`);
+
+  } catch (error) {
+    console.error('Erreur admin blacklist:', error);
+    return c.text('Erreur serveur', 500);
+  }
+});
+
 
 app.get('/inscription', (c) => {
   return c.html(`<!DOCTYPE html>
