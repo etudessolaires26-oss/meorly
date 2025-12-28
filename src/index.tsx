@@ -1681,9 +1681,22 @@ app.get('/admin', async (c) => {
           <label>Montant payé (€)</label>
           <input type="number" id="payment-amount" required min="0" step="1">
         </div>
+        
+        <!-- Section RIB/IBAN -->
+        <div style="background: rgba(76,175,80,.1); border: 1px solid rgba(76,175,80,.3); border-radius: 8px; padding: 16px; margin-bottom: 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <label style="margin: 0; font-size: 14px; font-weight: 700; color: #4caf50;">🏦 Vos coordonnées bancaires</label>
+            <button type="button" class="btn btn-small btn-success" onclick="copyRIB()">
+              📋 Copier
+            </button>
+          </div>
+          <textarea id="rib-info" style="width: 100%; min-height: 120px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.15); border-radius: 6px; padding: 12px; color: #f0f0f2; font-family: 'Courier New', monospace; font-size: 13px; resize: vertical;" placeholder="Titulaire: Académie de la Lumière&#10;IBAN: FR76 XXXX XXXX XXXX XXXX XXXX XXX&#10;BIC: XXXXXXXXX&#10;Banque: Votre Banque&#10;&#10;Référence: Inscription #ID"></textarea>
+          <p style="font-size: 11px; color: #b8aec9; margin-top: 8px;">💡 Modifiez ce RIB à tout moment. Cliquez sur "Copier" pour l'envoyer au client par email.</p>
+        </div>
+
         <div class="form-group">
-          <label>Lien de paiement envoyé</label>
-          <input type="url" id="payment-link" placeholder="https://...">
+          <label>Lien de paiement (optionnel)</label>
+          <input type="url" id="payment-link" placeholder="https://viva.com/... ou autre">
         </div>
         <button type="submit" class="btn" style="width: 100%;">
           Enregistrer le paiement
@@ -1694,6 +1707,24 @@ app.get('/admin', async (c) => {
 
   <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
   <script>
+    // Charger RIB depuis localStorage au chargement
+    window.addEventListener('DOMContentLoaded', () => {
+      const savedRIB = localStorage.getItem('admin_rib_info');
+      if (savedRIB) {
+        document.getElementById('rib-info').value = savedRIB;
+      }
+    });
+
+    // Sauvegarder RIB automatiquement lors de la modification
+    document.addEventListener('DOMContentLoaded', () => {
+      const ribInput = document.getElementById('rib-info');
+      if (ribInput) {
+        ribInput.addEventListener('blur', () => {
+          localStorage.setItem('admin_rib_info', ribInput.value);
+        });
+      }
+    });
+
     // Filtres
     document.getElementById('filter-status').addEventListener('change', filterTable);
     document.getElementById('filter-search').addEventListener('input', filterTable);
@@ -1782,6 +1813,30 @@ app.get('/admin', async (c) => {
       } catch (error) {
         alert('❌ ' + (error.response?.data?.error || 'Erreur'));
       }
+    }
+
+    // Copier RIB dans le presse-papier
+    function copyRIB() {
+      const ribText = document.getElementById('rib-info').value;
+      
+      if (!ribText.trim()) {
+        alert('⚠️ Veuillez d\'abord remplir vos coordonnées bancaires');
+        return;
+      }
+
+      navigator.clipboard.writeText(ribText).then(() => {
+        const btn = event.target;
+        const originalText = btn.textContent;
+        btn.textContent = '✅ Copié !';
+        btn.style.background = '#4caf50';
+        
+        setTimeout(() => {
+          btn.textContent = originalText;
+          btn.style.background = '';
+        }, 2000);
+      }).catch(err => {
+        alert('Erreur lors de la copie. Veuillez copier manuellement.');
+      });
     }
 
     // Auto-complétion montant selon formule
