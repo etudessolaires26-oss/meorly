@@ -913,6 +913,117 @@ app.post('/api/questionnaire', async (c) => {
   }
 });
 
+// API RDV - Confirmer le rendez-vous et envoyer email
+app.post('/api/rdv', async (c) => {
+  const { env } = c;
+  try {
+    const { inscription_id, date, slot, remarques } = await c.req.json();
+
+    // Validation
+    if (!inscription_id || !date || !slot) {
+      return c.json({ 
+        success: false, 
+        error: 'Données incomplètes' 
+      }, 400);
+    }
+
+    // Vérifier inscription
+    const inscription = await env.DB.prepare(`
+      SELECT i.id, i.prenom, i.nom, i.email, i.status,
+             m.theme, m.content
+      FROM inscriptions i
+      LEFT JOIN manifestes m ON i.id = m.inscription_id
+      WHERE i.id = ?
+    `).bind(inscription_id).first();
+
+    if (!inscription) {
+      return c.json({ 
+        success: false, 
+        error: 'Inscription introuvable' 
+      }, 404);
+    }
+
+    if (inscription.status !== 'pending_appointment') {
+      return c.json({ 
+        success: false, 
+        error: 'Le rendez-vous a déjà été confirmé' 
+      }, 400);
+    }
+
+    // Créer le rendez-vous
+    const slotLabels = {
+      'matin': 'Matin (9h-12h)',
+      'apres-midi': 'Après-midi (14h-17h)',
+      'soir': 'Soir (18h-20h)'
+    };
+
+    await env.DB.prepare(`
+      INSERT INTO rendez_vous (client_id, date_rdv, status, notes)
+      VALUES (?, ?, 'scheduled', ?)
+    `).bind(
+      inscription_id,
+      date + ' ' + slot,
+      remarques || 'Pas de remarques'
+    ).run();
+
+    // Update status inscription
+    await env.DB.prepare(`
+      UPDATE inscriptions 
+      SET status = 'contacted'
+      WHERE id = ?
+    `).bind(inscription_id).run();
+
+    // Préparer email de confirmation
+    const dateFormatted = new Date(date).toLocaleDateString('fr-FR', { 
+      weekday: 'long', 
+      day: 'numeric', 
+      month: 'long', 
+      year: 'numeric' 
+    });
+
+    const emailBody = 'Bonjour ' + inscription.prenom + ',\n\n' +
+      'Votre demande de rendez-vous a été enregistrée avec succès ! ✨\n\n' +
+      'DÉTAILS DE VOTRE RENDEZ-VOUS\n' +
+      '━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+      '📅 Date souhaitée : ' + dateFormatted + '\n' +
+      '⏰ Créneau : ' + slotLabels[slot] + '\n' +
+      '📧 Email : ' + inscription.email + '\n\n' +
+      'VOS THÈMES SPIRITUELS\n' +
+      '━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+      inscription.theme + '\n\n' +
+      'PROCHAINES ÉTAPES\n' +
+      '━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+      'Un de nos guides va vous contacter dans les 24-48h pour confirmer l\'horaire exact et préparer votre premier entretien gratuit.\n\n' +
+      'Ce premier entretien de 45 minutes nous permettra de :\n' +
+      '• Comprendre vos besoins spirituels\n' +
+      '• Discuter de votre manifeste personnel\n' +
+      '• Recommander le parcours le plus adapté pour vous\n\n' +
+      'IMPORTANT : Ce premier entretien est totalement gratuit et sans engagement.\n\n' +
+      'Nous avons hâte de vous accompagner dans votre parcours spirituel ! 🙏\n\n' +
+      'L\'équipe de l\'Académie de la Lumière\n' +
+      '━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+      'Western Wall Plaza, Jewish Quarter\n' +
+      'Old City, Jerusalem, Israel';
+
+
+    // TODO: Intégrer un service d'email (SendGrid, Resend, etc.)
+    // Pour l'instant, on log l'email
+    console.log('EMAIL DE CONFIRMATION:', emailBody);
+
+    return c.json({
+      success: true,
+      message: 'Rendez-vous confirmé ! Vous allez recevoir un email de confirmation.'
+    });
+
+  } catch (error) {
+    console.error('Erreur RDV API:', error);
+    return c.json({ 
+      success: false, 
+      error: 'Une erreur est survenue lors de la confirmation' 
+    }, 500);
+  }
+});
+
 // API Inscription - Créer une demande de rendez-vous
 app.post('/api/inscription', async (c) => {
   const { env } = c;
@@ -1814,6 +1925,482 @@ app.get('/questionnaire/:id', async (c) => {
   } catch (error) {
     console.error('Erreur questionnaire:', error);
     return c.html('<h1>Erreur lors du chargement du questionnaire</h1>');
+  }
+});
+
+// =============================================
+// RDV PAGE
+// =============================================
+
+// Route: Prise de rendez-vous
+app.get('/rdv/:id', async (c) => {
+  const { env } = c;
+  const inscriptionId = c.req.param('id');
+
+  try {
+    // Récupérer inscription + manifeste
+    const inscription = await env.DB.prepare(`
+      SELECT i.id, i.prenom, i.nom, i.email, i.status,
+             m.theme
+      FROM inscriptions i
+      LEFT JOIN manifestes m ON i.id = m.inscription_id
+      WHERE i.id = ?
+    `).bind(inscriptionId).first();
+
+    if (!inscription) {
+      return c.html('<h1>Inscription introuvable</h1>');
+    }
+
+    if (inscription.status !== 'pending_appointment') {
+      return c.html('<h1>Vous avez déjà confirmé votre rendez-vous</h1>');
+    }
+
+    // Générer les dates disponibles (3 prochains jours ouvrés)
+    const today = new Date();
+    const availableDates = [];
+    let daysAdded = 0;
+    let currentDate = new Date(today);
+    
+    while (daysAdded < 5) {
+      currentDate.setDate(currentDate.getDate() + 1);
+      const dayOfWeek = currentDate.getDay();
+      
+      // Exclure samedi (6) et dimanche (0)
+      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+        availableDates.push({
+          date: currentDate.toISOString().split('T')[0],
+          label: currentDate.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
+        });
+        daysAdded++;
+      }
+    }
+
+    return c.html(`<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prise de Rendez-vous - Académie de la Lumière</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #0f0f1e 100%);
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+    .container {
+      background: white;
+      border-radius: 16px;
+      padding: 48px;
+      max-width: 700px;
+      margin: 0 auto;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    h1 {
+      font-size: 32px;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin-bottom: 12px;
+    }
+    .subtitle {
+      color: #666;
+      margin-bottom: 32px;
+      font-size: 16px;
+    }
+    .info-box {
+      background: #f0f8ff;
+      border-left: 4px solid #4a90e2;
+      padding: 20px;
+      margin-bottom: 32px;
+      border-radius: 8px;
+    }
+    .info-box h3 {
+      font-size: 16px;
+      font-weight: 600;
+      color: #1a1a2e;
+      margin-bottom: 8px;
+    }
+    .info-box p {
+      color: #555;
+      line-height: 1.6;
+    }
+    .form-group {
+      margin-bottom: 28px;
+    }
+    label {
+      display: block;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 12px;
+      font-size: 16px;
+    }
+    .required { color: #e74c3c; }
+    .radio-group {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .radio-option {
+      padding: 16px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.3s;
+      background: white;
+      display: flex;
+      align-items: center;
+    }
+    .radio-option:hover {
+      border-color: #4a90e2;
+      background: #f0f8ff;
+    }
+    .radio-option input[type="radio"] {
+      margin-right: 12px;
+      width: 20px;
+      height: 20px;
+      cursor: pointer;
+    }
+    .radio-option.selected {
+      border-color: #4a90e2;
+      background: #e3f2fd;
+    }
+    .slot-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .slot-option {
+      padding: 12px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.3s;
+      font-size: 14px;
+      font-weight: 500;
+    }
+    .slot-option:hover {
+      border-color: #4a90e2;
+      background: #f0f8ff;
+    }
+    .slot-option input[type="radio"] {
+      display: none;
+    }
+    .slot-option.selected {
+      border-color: #4a90e2;
+      background: #4a90e2;
+      color: white;
+    }
+    textarea {
+      width: 100%;
+      padding: 14px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 16px;
+      font-family: inherit;
+      resize: vertical;
+      min-height: 100px;
+    }
+    textarea:focus {
+      outline: none;
+      border-color: #4a90e2;
+    }
+    .btn {
+      width: 100%;
+      padding: 16px;
+      background: #4a90e2;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+    .btn:hover { background: #357abd; }
+    .btn:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .message {
+      padding: 16px;
+      border-radius: 8px;
+      margin-bottom: 24px;
+      display: none;
+    }
+    .message.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+    .hint {
+      font-size: 13px;
+      color: #666;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📅 Confirmez votre rendez-vous gratuit</h1>
+    <p class="subtitle">Bonjour <strong>${inscription.prenom}</strong>, choisissez le créneau qui vous convient le mieux</p>
+
+    <div class="info-box">
+      <h3>Vos thèmes spirituels sélectionnés</h3>
+      <p>${inscription.theme || 'Aucun thème'}</p>
+    </div>
+
+    <div id="message" class="message"></div>
+
+    <form id="rdv-form">
+      <div class="form-group">
+        <label>Choisissez une date <span class="required">*</span></label>
+        <div class="radio-group" id="dates-container">
+          ${availableDates.map((d, i) => `
+            <div class="radio-option" data-date="${d.date}">
+              <input type="radio" name="date" value="${d.date}" id="date${i}" ${i === 0 ? 'checked' : ''} required>
+              <label for="date${i}" style="cursor:pointer;margin:0;font-weight:normal;">${d.label}</label>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Choisissez un créneau horaire <span class="required">*</span></label>
+        <div class="slot-grid">
+          <div class="slot-option selected" data-slot="matin">
+            <input type="radio" name="slot" value="matin" id="slot-matin" checked required>
+            <label for="slot-matin" style="cursor:pointer;margin:0;">🌅 Matin<br><span style="font-size:12px;">9h-12h</span></label>
+          </div>
+          <div class="slot-option" data-slot="apres-midi">
+            <input type="radio" name="slot" value="apres-midi" id="slot-apres-midi" required>
+            <label for="slot-apres-midi" style="cursor:pointer;margin:0;">☀️ Après-midi<br><span style="font-size:12px;">14h-17h</span></label>
+          </div>
+          <div class="slot-option" data-slot="soir">
+            <input type="radio" name="slot" value="soir" id="slot-soir" required>
+            <label for="slot-soir" style="cursor:pointer;margin:0;">🌙 Soir<br><span style="font-size:12px;">18h-20h</span></label>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Remarques ou préférences (optionnel)</label>
+        <textarea name="remarques" placeholder="Avez-vous des préférences d'horaire précises ou des informations à partager ?"></textarea>
+        <p class="hint">Nous ferons de notre mieux pour respecter vos préférences</p>
+      </div>
+
+      <button type="submit" class="btn" id="submit-btn">Confirmer mon rendez-vous gratuit</button>
+    </form>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
+  <script>
+    const inscriptionId = ${inscriptionId};
+    const form = document.getElementById('rdv-form');
+    const message = document.getElementById('message');
+    const submitBtn = document.getElementById('submit-btn');
+
+    // Gestion des radio options pour dates
+    const dateOptions = document.querySelectorAll('.radio-option');
+    dateOptions.forEach(option => {
+      option.addEventListener('click', () => {
+        const radio = option.querySelector('input[type="radio"]');
+        radio.checked = true;
+        
+        dateOptions.forEach(opt => opt.classList.remove('selected'));
+        option.classList.add('selected');
+      });
+    });
+
+    // Gestion des slots horaires
+    const slotOptions = document.querySelectorAll('.slot-option');
+    slotOptions.forEach(option => {
+      option.addEventListener('click', () => {
+        const radio = option.querySelector('input[type="radio"]');
+        radio.checked = true;
+        
+        slotOptions.forEach(opt => opt.classList.remove('selected'));
+        option.classList.add('selected');
+      });
+    });
+
+    // Soumettre le RDV
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const formData = new FormData(form);
+      const data = {
+        inscription_id: inscriptionId,
+        date: formData.get('date'),
+        slot: formData.get('slot'),
+        remarques: formData.get('remarques')
+      };
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Confirmation en cours...';
+
+      try {
+        const response = await axios.post('/api/rdv', data);
+
+        if (response.data.success) {
+          // Redirection vers page de confirmation
+          window.location.href = '/confirmation/' + inscriptionId;
+        }
+      } catch (error) {
+        message.className = 'message error';
+        message.style.display = 'block';
+        message.textContent = '❌ ' + (error.response?.data?.error || 'Erreur lors de la confirmation');
+        
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Confirmer mon rendez-vous gratuit';
+      }
+    });
+  </script>
+</body>
+</html>`);
+
+  } catch (error) {
+    console.error('Erreur RDV page:', error);
+    return c.html('<h1>Erreur lors du chargement de la page</h1>');
+  }
+});
+
+// =============================================
+// CONFIRMATION PAGE
+// =============================================
+
+// Route: Page de confirmation après RDV
+app.get('/confirmation/:id', async (c) => {
+  const { env } = c;
+  const inscriptionId = c.req.param('id');
+
+  try {
+    const inscription = await env.DB.prepare(`
+      SELECT i.prenom, i.nom, i.email,
+             r.date_rdv, r.notes
+      FROM inscriptions i
+      LEFT JOIN rendez_vous r ON i.id = r.client_id
+      WHERE i.id = ?
+      ORDER BY r.created_at DESC
+      LIMIT 1
+    `).bind(inscriptionId).first();
+
+    if (!inscription) {
+      return c.html('<h1>Inscription introuvable</h1>');
+    }
+
+    return c.html(`<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Confirmation - Académie de la Lumière</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #0f0f1e 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .container {
+      background: white;
+      border-radius: 16px;
+      padding: 48px;
+      max-width: 600px;
+      width: 100%;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      text-align: center;
+    }
+    .success-icon {
+      font-size: 64px;
+      margin-bottom: 24px;
+    }
+    h1 {
+      font-size: 32px;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin-bottom: 16px;
+    }
+    .message {
+      color: #555;
+      font-size: 18px;
+      line-height: 1.6;
+      margin-bottom: 32px;
+    }
+    .info-box {
+      background: #f0f8ff;
+      border-left: 4px solid #4a90e2;
+      padding: 24px;
+      margin-bottom: 32px;
+      border-radius: 8px;
+      text-align: left;
+    }
+    .info-box h3 {
+      font-size: 16px;
+      font-weight: 600;
+      color: #1a1a2e;
+      margin-bottom: 16px;
+    }
+    .info-box p {
+      color: #555;
+      line-height: 1.8;
+      margin-bottom: 12px;
+    }
+    .info-box strong {
+      color: #1a1a2e;
+    }
+    .btn {
+      display: inline-block;
+      padding: 16px 32px;
+      background: #4a90e2;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: background 0.3s;
+    }
+    .btn:hover { background: #357abd; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="success-icon">✅</div>
+    <h1>Rendez-vous confirmé !</h1>
+    <p class="message">
+      Merci <strong>${inscription.prenom}</strong> ! Votre demande de rendez-vous a été enregistrée avec succès.
+    </p>
+
+    <div class="info-box">
+      <h3>📧 Email de confirmation envoyé</h3>
+      <p>
+        Un email de confirmation a été envoyé à <strong>${inscription.email}</strong>
+      </p>
+      <p>
+        <strong>Prochaines étapes :</strong><br>
+        • Un de nos guides va vous contacter dans les 24-48h<br>
+        • Vous recevrez la confirmation de l'horaire exact<br>
+        • Le premier entretien dure 45 minutes et est totalement gratuit
+      </p>
+    </div>
+
+    <a href="/" class="btn">Retour à l'accueil</a>
+  </div>
+</body>
+</html>`);
+
+  } catch (error) {
+    console.error('Erreur confirmation page:', error);
+    return c.html('<h1>Erreur lors du chargement de la confirmation</h1>');
   }
 });
 
