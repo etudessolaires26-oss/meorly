@@ -777,51 +777,128 @@ app.post('/api/auth/logout', (c) => {
 // INSCRIPTION ROUTES
 // =============================================
 
-// API Inscription - Créer une nouvelle inscription
+// API Inscription - Créer un compte utilisateur complet
 app.post('/api/inscription', async (c) => {
   const { env } = c;
   
   try {
     const body = await c.req.json();
-    const { prenom, nom, email, tel, objectif } = body;
+    const { prenom, nom, email, tel, password, formule, theme, theme_autre, situation, objectifs } = body;
 
     // Validation
-    if (!prenom || !nom || !email) {
+    if (!prenom || !nom || !email || !tel || !password || !formule || !theme || !situation || !objectifs) {
       return c.json({ 
         success: false, 
-        error: 'Les champs prénom, nom et email sont requis' 
+        error: 'Tous les champs obligatoires (*) doivent être remplis' 
       }, 400);
     }
 
-    // Vérifier si l'email existe déjà
-    const existing = await env.DB.prepare(
-      'SELECT id FROM inscriptions WHERE email = ?'
-    ).bind(email).first();
-
-    if (existing) {
+    // Validation mot de passe
+    if (password.length < 8) {
       return c.json({ 
         success: false, 
-        error: 'Cet email est déjà inscrit' 
+        error: 'Le mot de passe doit contenir au moins 8 caractères' 
+      }, 400);
+    }
+
+    // Vérifier si l'email existe déjà dans users
+    const existingUser = await env.DB.prepare(
+      'SELECT id FROM users WHERE email = ?'
+    ).bind(email).first();
+
+    if (existingUser) {
+      return c.json({ 
+        success: false, 
+        error: 'Cet email est déjà utilisé' 
       }, 409);
     }
 
-    // Insérer la nouvelle inscription
-    const result = await env.DB.prepare(`
-      INSERT INTO inscriptions (prenom, nom, email, tel, objectif)
-      VALUES (?, ?, ?, ?, ?)
-    `).bind(prenom, nom, email, tel || null, objectif || null).run();
+    // Hash du mot de passe
+    const password_hash = bcrypt.hashSync(password, 10);
+
+    // Déterminer le prix de la formule
+    const formuleMap: Record<string, number> = {
+      'essentiel': 175,
+      'psaumes': 495,
+      'integral': 1500
+    };
+    const formule_prix = formuleMap[formule] || 0;
+
+    // 1. Créer l'utilisateur
+    const userResult = await env.DB.prepare(`
+      INSERT INTO users (email, password_hash, role, status)
+      VALUES (?, ?, 'client', 'pending_payment')
+    `).bind(email, password_hash).run();
+
+    const user_id = userResult.meta.last_row_id;
+
+    // 2. Créer le profil utilisateur
+    await env.DB.prepare(`
+      INSERT INTO user_profiles (
+        user_id, prenom, nom, tel, 
+        formule, formule_prix, 
+        payment_status
+      )
+      VALUES (?, ?, ?, ?, ?, ?, 'pending')
+    `).bind(user_id, prenom, nom, tel, formule, formule_prix).run();
+
+    // 3. Créer l'inscription (ancienne table, pour compatibilité)
+    const inscriptionResult = await env.DB.prepare(`
+      INSERT INTO inscriptions (prenom, nom, email, tel, objectif, user_id)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).bind(prenom, nom, email, tel, theme, user_id).run();
+
+    const inscription_id = inscriptionResult.meta.last_row_id;
+
+    // 4. Créer le manifeste automatiquement
+    const manifesteResult = await env.DB.prepare(`
+      INSERT INTO manifestes (
+        inscription_id, theme, theme_autre, content, reponses, status
+      )
+      VALUES (?, ?, ?, ?, ?, 'submitted')
+    `).bind(
+      inscription_id, 
+      theme, 
+      theme_autre || null,
+      situation,
+      JSON.stringify([
+        { question: 'Situation actuelle', reponse: situation },
+        { question: 'Objectifs', reponse: objectifs }
+      ])
+    ).run();
+
+    const manifeste_id = manifesteResult.meta.last_row_id;
+
+    // 5. Analyser le manifeste et attribuer Petek/Psaumes/Anges automatiquement
+    const fullText = `${theme} ${theme_autre || ''} ${situation} ${objectifs}`;
+    const keywords = analyzeManifeste(fullText);
+    
+    // Attribution Petek
+    await assignPetekToUser(env.DB, inscription_id, keywords);
+    
+    // Attribution Psaumes
+    await assignPsalmsToUser(env.DB, inscription_id, keywords);
+    
+    // Attribution Anges
+    await assignAngelsToUser(env.DB, inscription_id, keywords);
+
+    // Mettre à jour le statut du manifeste
+    await env.DB.prepare(`
+      UPDATE manifestes SET status = 'analyzed' WHERE id = ?
+    `).bind(manifeste_id).run();
 
     return c.json({ 
       success: true,
-      id: result.meta.last_row_id,
-      message: 'Inscription réussie ! Nous vous contacterons bientôt.'
+      user_id,
+      inscription_id,
+      message: 'Compte créé avec succès ! Votre parcours spirituel est prêt. Nous vous contacterons pour le premier entretien.'
     });
 
   } catch (error) {
     console.error('Erreur lors de l\'inscription:', error);
     return c.json({ 
       success: false, 
-      error: 'Une erreur est survenue lors de l\'inscription' 
+      error: 'Une erreur est survenue lors de la création du compte' 
     }, 500);
   }
 })
@@ -2639,45 +2716,115 @@ app.get('/', (c) => {
       <div class="wrap grid2">
         <div>
           <h2>Inscription gratuite</h2>
-          <p>Créez votre compte. Nous revenons vers vous pour planifier le premier rendez‑vous offert.</p>
+          <p>Créez votre compte et choisissez votre formule. Premier entretien gratuit, paiement après validation mutuelle.</p>
 
           <div id="success-message" class="success-message">
             ✨ Inscription réussie ! Nous vous contacterons bientôt.
           </div>
 
           <form id="inscription-form" class="card" aria-label="Formulaire d'inscription">
-            <div style="display:grid; gap:10px; max-width: 520px;">
-              <div style="display:grid; gap:6px;">
-                <label for="prenom" style="font-size:12px; color: var(--muted2);">Prénom</label>
-                <input id="prenom" name="prenom" required placeholder="Votre prénom" />
-              </div>
-              <div style="display:grid; gap:6px;">
-                <label for="nom" style="font-size:12px; color: var(--muted2);">Nom</label>
-                <input id="nom" name="nom" required placeholder="Votre nom" />
-              </div>
-              <div style="display:grid; gap:6px;">
-                <label for="email" style="font-size:12px; color: var(--muted2);">Email</label>
-                <input id="email" type="email" name="email" required placeholder="votre@mail.com" />
-              </div>
-              <div style="display:grid; gap:6px;">
-                <label for="tel" style="font-size:12px; color: var(--muted2);">Téléphone (optionnel)</label>
-                <input id="tel" name="tel" placeholder="+33 …" />
-              </div>
-              <div style="display:grid; gap:6px;">
-                <label for="objectif" style="font-size:12px; color: var(--muted2);">Objectif principal</label>
-                <select id="objectif" name="objectif">
-                  <option value="">Choisir…</option>
-                  <option>Clarté</option>
-                  <option>Réussite</option>
-                  <option>Paix intérieure</option>
-                  <option>Protection</option>
-                  <option>Relations</option>
-                  <option>Direction</option>
-                </select>
+            <div style="display:grid; gap:16px; max-width: 520px;">
+              
+              <!-- Informations personnelles -->
+              <div style="border-bottom: 1px solid rgba(255,255,255,.08); padding-bottom: 16px;">
+                <h3 style="margin: 0 0 12px 0; font-size: 16px;">Vos informations</h3>
+                
+                <div style="display:grid; gap:10px;">
+                  <div style="display:grid; gap:6px;">
+                    <label for="prenom" style="font-size:12px; color: var(--muted2);">Prénom *</label>
+                    <input id="prenom" name="prenom" required placeholder="Votre prénom" />
+                  </div>
+                  <div style="display:grid; gap:6px;">
+                    <label for="nom" style="font-size:12px; color: var(--muted2);">Nom *</label>
+                    <input id="nom" name="nom" required placeholder="Votre nom" />
+                  </div>
+                  <div style="display:grid; gap:6px;">
+                    <label for="email" style="font-size:12px; color: var(--muted2);">Email *</label>
+                    <input id="email" type="email" name="email" required placeholder="votre@email.com" />
+                  </div>
+                  <div style="display:grid; gap:6px;">
+                    <label for="tel" style="font-size:12px; color: var(--muted2);">Téléphone *</label>
+                    <input id="tel" name="tel" required placeholder="+33 6 12 34 56 78" />
+                  </div>
+                  <div style="display:grid; gap:6px;">
+                    <label for="password" style="font-size:12px; color: var(--muted2);">Mot de passe *</label>
+                    <input id="password" type="password" name="password" required placeholder="••••••••" minlength="8" />
+                    <span style="font-size:11px; color: var(--muted2);">Minimum 8 caractères</span>
+                  </div>
+                </div>
               </div>
 
-              <button class="btn btn-primary" type="submit" style="justify-self:start;">Envoyer</button>
-              <div class="hint">Aucun paiement requis • Sans engagement • Premier rendez‑vous offert</div>
+              <!-- Choix de formule -->
+              <div style="border-bottom: 1px solid rgba(255,255,255,.08); padding-bottom: 16px;">
+                <h3 style="margin: 0 0 12px 0; font-size: 16px;">Formule souhaitée *</h3>
+                
+                <div style="display:grid; gap:10px;">
+                  <label style="display: flex; gap: 10px; padding: 12px; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; cursor: pointer; transition: all 0.2s;">
+                    <input type="radio" name="formule" value="essentiel" required style="width: auto; margin: 0;" />
+                    <div style="flex: 1;">
+                      <strong style="display: block; margin-bottom: 4px;">Petek Essentiel - 175€</strong>
+                      <span style="font-size: 12px; color: var(--muted2);">1 entretien, 1 Petek, accès illimité</span>
+                    </div>
+                  </label>
+                  
+                  <label style="display: flex; gap: 10px; padding: 12px; border: 2px solid rgba(179,136,235,.4); border-radius: 8px; cursor: pointer; background: rgba(179,136,235,.05); transition: all 0.2s;">
+                    <input type="radio" name="formule" value="psaumes" style="width: auto; margin: 0;" />
+                    <div style="flex: 1;">
+                      <strong style="display: block; margin-bottom: 4px;">Petek & Psaumes - 495€ <span style="background: var(--accent); color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px; margin-left: 6px;">Recommandé</span></strong>
+                      <span style="font-size: 12px; color: var(--muted2);">3 entretiens, Peteks & Psaumes personnalisés, 1 Ange</span>
+                    </div>
+                  </label>
+                  
+                  <label style="display: flex; gap: 10px; padding: 12px; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; cursor: pointer; transition: all 0.2s;">
+                    <input type="radio" name="formule" value="integral" style="width: auto; margin: 0;" />
+                    <div style="flex: 1;">
+                      <strong style="display: block; margin-bottom: 4px;">Parcours Intégral - 1500€</strong>
+                      <span style="font-size: 12px; color: var(--muted2);">6 mois d'accompagnement illimité, tout inclus</span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              <!-- Questions manifeste -->
+              <div>
+                <h3 style="margin: 0 0 12px 0; font-size: 16px;">Votre manifeste spirituel</h3>
+                
+                <div style="display:grid; gap:10px;">
+                  <div style="display:grid; gap:6px;">
+                    <label for="theme" style="font-size:12px; color: var(--muted2);">Thème principal *</label>
+                    <select id="theme" name="theme" required>
+                      <option value="">-- Choisissez un thème --</option>
+                      <option value="paix">Paix intérieure</option>
+                      <option value="amour">Amour & Relations</option>
+                      <option value="reussite">Réussite & Abondance</option>
+                      <option value="sante">Santé & Vitalité</option>
+                      <option value="protection">Protection & Sécurité</option>
+                      <option value="sagesse">Sagesse & Clarté</option>
+                      <option value="autre">Autre</option>
+                    </select>
+                  </div>
+
+                  <div id="theme-autre-box" style="display: none;">
+                    <div style="display:grid; gap:6px;">
+                      <label for="theme_autre" style="font-size:12px; color: var(--muted2);">Précisez votre thème</label>
+                      <input id="theme_autre" name="theme_autre" placeholder="Ex: Guérison émotionnelle, pardon..." />
+                    </div>
+                  </div>
+
+                  <div style="display:grid; gap:6px;">
+                    <label for="situation" style="font-size:12px; color: var(--muted2);">Décrivez votre situation actuelle *</label>
+                    <textarea id="situation" name="situation" required placeholder="Parlez-nous de votre situation, vos défis, vos aspirations..." style="min-height: 100px; resize: vertical;"></textarea>
+                  </div>
+
+                  <div style="display:grid; gap:6px;">
+                    <label for="objectifs" style="font-size:12px; color: var(--muted2);">Que souhaitez-vous atteindre ? *</label>
+                    <textarea id="objectifs" name="objectifs" required placeholder="Vos aspirations, ce que vous souhaitez transformer..." style="min-height: 80px; resize: vertical;"></textarea>
+                  </div>
+                </div>
+              </div>
+
+              <button class="btn btn-primary" type="submit" style="justify-self:start;">Créer mon compte</button>
+              <div class="hint">Premier entretien gratuit • Paiement après validation mutuelle • Sans engagement</div>
             </div>
           </form>
         </div>
@@ -2725,6 +2872,16 @@ app.get('/', (c) => {
     // Set current year
     document.getElementById('y').textContent = new Date().getFullYear();
 
+    // Show/hide theme_autre field
+    document.getElementById('theme').addEventListener('change', (e) => {
+      const themeAutreBox = document.getElementById('theme-autre-box');
+      if (e.target.value === 'autre') {
+        themeAutreBox.style.display = 'block';
+      } else {
+        themeAutreBox.style.display = 'none';
+      }
+    });
+
     // Handle form submission
     document.getElementById('inscription-form').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -2734,24 +2891,28 @@ app.get('/', (c) => {
         nom: document.getElementById('nom').value,
         email: document.getElementById('email').value,
         tel: document.getElementById('tel').value,
-        objectif: document.getElementById('objectif').value
+        password: document.getElementById('password').value,
+        formule: document.querySelector('input[name="formule"]:checked')?.value,
+        theme: document.getElementById('theme').value,
+        theme_autre: document.getElementById('theme_autre').value || null,
+        situation: document.getElementById('situation').value,
+        objectifs: document.getElementById('objectifs').value
       };
 
       try {
         const response = await axios.post('/api/inscription', formData);
         
         if (response.data.success) {
-          const inscriptionId = response.data.id;
+          const userId = response.data.user_id;
           
-          // Show success message with link to manifeste
+          // Show success message
           const successMsg = document.getElementById('success-message');
           successMsg.innerHTML = 
-            '<strong>✓ Inscription réussie !</strong><br>' +
+            '<strong>✓ Compte créé avec succès !</strong><br>' +
             '<span style="font-size: 14px; margin-top: 8px; display: block;">' +
-            'Passez maintenant à l\'étape suivante : ' +
-            '<a href="/mon-manifeste/' + inscriptionId + '" ' +
-            'style="color: #b388eb; text-decoration: underline; font-weight: 500;">' +
-            'rédiger votre manifeste spirituel →' +
+            'Nous vous contacterons pour planifier votre premier entretien gratuit. ' +
+            '<a href="/login" style="color: #b388eb; text-decoration: underline; font-weight: 500;">' +
+            'Se connecter →' +
             '</a>' +
             '</span>';
           successMsg.classList.add('show');
@@ -2759,18 +2920,18 @@ app.get('/', (c) => {
           // Reset form
           e.target.reset();
           
-          // Auto redirect after 3 seconds
+          // Auto redirect after 5 seconds
           setTimeout(() => {
-            window.location.href = '/mon-manifeste/' + inscriptionId;
-          }, 3000);
+            window.location.href = '/login';
+          }, 5000);
         }
       } catch (error) {
         console.error('Erreur lors de l\'inscription:', error);
         
         if (error.response?.status === 409) {
-          alert('Cet email est déjà inscrit. Veuillez utiliser un autre email.');
+          alert('Cet email est déjà utilisé. Veuillez utiliser un autre email ou vous connecter.');
         } else {
-          alert('Une erreur est survenue. Veuillez réessayer.');
+          alert(error.response?.data?.error || 'Une erreur est survenue. Veuillez réessayer.');
         }
       }
     });
