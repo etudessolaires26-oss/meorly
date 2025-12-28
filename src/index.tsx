@@ -1,6 +1,8 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { serveStatic } from 'hono/cloudflare-workers'
+import { sign, verify } from 'hono/jwt'
+import * as bcrypt from 'bcryptjs'
 
 type Bindings = {
   DB: D1Database;
@@ -13,6 +15,84 @@ app.use('/api/*', cors())
 
 // Serve static files
 app.use('/static/*', serveStatic({ root: './' }))
+
+// =============================================
+// HELPERS - JWT & Auth
+// =============================================
+
+const JWT_SECRET = 'your-super-secret-jwt-key-change-in-production-12345'; // TODO: Move to environment variable
+
+interface JWTPayload {
+  userId: number;
+  email: string;
+  role: string;
+  exp: number;
+}
+
+/**
+ * Générer un token JWT
+ */
+async function generateToken(userId: number, email: string, role: string): Promise<string> {
+  const payload: JWTPayload = {
+    userId,
+    email,
+    role,
+    exp: Math.floor(Date.now() / 1000) + (60 * 60 * 24 * 7) // 7 jours
+  };
+  
+  return await sign(payload, JWT_SECRET);
+}
+
+/**
+ * Vérifier un token JWT
+ */
+async function verifyToken(token: string): Promise<JWTPayload | null> {
+  try {
+    const payload = await verify(token, JWT_SECRET) as JWTPayload;
+    
+    // Vérifier l'expiration
+    if (payload.exp < Math.floor(Date.now() / 1000)) {
+      return null;
+    }
+    
+    return payload;
+  } catch (error) {
+    return null;
+  }
+}
+
+/**
+ * Middleware d'authentification
+ */
+async function authMiddleware(c: any, requiredRole?: string) {
+  const authHeader = c.req.header('Authorization');
+  
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return c.json({ success: false, error: 'Token manquant' }, 401);
+  }
+  
+  const token = authHeader.substring(7);
+  const payload = await verifyToken(token);
+  
+  if (!payload) {
+    return c.json({ success: false, error: 'Token invalide ou expiré' }, 401);
+  }
+  
+  // Vérifier le rôle si spécifié
+  if (requiredRole) {
+    if (requiredRole === 'admin' && payload.role !== 'super_admin') {
+      return c.json({ success: false, error: 'Accès refusé - Admin requis' }, 403);
+    }
+    if (requiredRole === 'guide' && payload.role !== 'guide' && payload.role !== 'super_admin') {
+      return c.json({ success: false, error: 'Accès refusé - Guide requis' }, 403);
+    }
+  }
+  
+  // Ajouter les infos utilisateur au contexte
+  c.set('user', payload);
+  
+  return null; // Continuer
+}
 
 // =============================================
 // HELPERS - Attribution Logique
@@ -554,6 +634,149 @@ app.get('/api/hello', (c) => {
   return c.json({ message: 'Bienvenue à l\'Académie de la Lumière' })
 })
 
+// =============================================
+// AUTH ROUTES
+// =============================================
+
+// POST /api/auth/login - Connexion utilisateur
+app.post('/api/auth/login', async (c) => {
+  const { env } = c;
+  
+  try {
+    const body = await c.req.json();
+    const { email, password } = body;
+    
+    // Validation
+    if (!email || !password) {
+      return c.json({ 
+        success: false, 
+        error: 'Email et mot de passe requis' 
+      }, 400);
+    }
+    
+    // Récupérer l'utilisateur
+    const user = await env.DB.prepare(`
+      SELECT u.id, u.email, u.password_hash, u.role, u.status,
+             p.prenom, p.nom
+      FROM users u
+      LEFT JOIN user_profiles p ON u.id = p.user_id
+      WHERE u.email = ?
+    `).bind(email).first();
+    
+    if (!user) {
+      return c.json({ 
+        success: false, 
+        error: 'Email ou mot de passe incorrect' 
+      }, 401);
+    }
+    
+    // Vérifier le mot de passe
+    const isValidPassword = bcrypt.compareSync(password, user.password_hash as string);
+    
+    if (!isValidPassword) {
+      return c.json({ 
+        success: false, 
+        error: 'Email ou mot de passe incorrect' 
+      }, 401);
+    }
+    
+    // Vérifier le statut du compte
+    if (user.status === 'suspended' || user.status === 'inactive') {
+      return c.json({ 
+        success: false, 
+        error: 'Votre compte est suspendu. Contactez l\'administrateur.' 
+      }, 403);
+    }
+    
+    // Générer le token JWT
+    const token = await generateToken(
+      user.id as number, 
+      user.email as string, 
+      user.role as string
+    );
+    
+    // Mettre à jour last_login
+    await env.DB.prepare(`
+      UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?
+    `).bind(user.id).run();
+    
+    return c.json({
+      success: true,
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        status: user.status,
+        prenom: user.prenom,
+        nom: user.nom
+      }
+    });
+    
+  } catch (error) {
+    console.error('Erreur login:', error);
+    return c.json({ 
+      success: false, 
+      error: 'Erreur lors de la connexion' 
+    }, 500);
+  }
+});
+
+// GET /api/auth/me - Récupérer les infos de l'utilisateur connecté
+app.get('/api/auth/me', async (c) => {
+  const { env } = c;
+  
+  // Vérifier l'authentification
+  const authError = await authMiddleware(c);
+  if (authError) return authError;
+  
+  const userPayload = c.get('user') as JWTPayload;
+  
+  try {
+    // Récupérer les infos complètes
+    const user = await env.DB.prepare(`
+      SELECT u.id, u.email, u.role, u.status, u.created_at, u.last_login,
+             p.prenom, p.nom, p.tel, p.formule, p.payment_status, p.guide_id
+      FROM users u
+      LEFT JOIN user_profiles p ON u.id = p.user_id
+      WHERE u.id = ?
+    `).bind(userPayload.userId).first();
+    
+    if (!user) {
+      return c.json({ 
+        success: false, 
+        error: 'Utilisateur non trouvé' 
+      }, 404);
+    }
+    
+    return c.json({
+      success: true,
+      user
+    });
+    
+  } catch (error) {
+    console.error('Erreur récupération user:', error);
+    return c.json({ 
+      success: false, 
+      error: 'Erreur serveur' 
+    }, 500);
+  }
+});
+
+// POST /api/auth/logout - Déconnexion (côté client, invalider le token)
+app.post('/api/auth/logout', (c) => {
+  // Côté client: supprimer le token du localStorage
+  // Côté serveur: rien à faire (JWT stateless)
+  return c.json({ 
+    success: true, 
+    message: 'Déconnexion réussie' 
+  });
+});
+
+// =============================================
+// INSCRIPTION ROUTES
+// =============================================
+
 // API Inscription - Créer une nouvelle inscription
 app.post('/api/inscription', async (c) => {
   const { env } = c;
@@ -807,6 +1030,215 @@ app.get('/admin', async (c) => {
     console.error('Erreur admin:', error);
     return c.html('<h1>Erreur lors du chargement des données</h1>')
   }
+})
+
+// =============================================
+// AUTH PAGES
+// =============================================
+
+// Route: Page de connexion
+app.get('/login', (c) => {
+  return c.html(`<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Connexion - Académie de la Lumière</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0a0a0f;
+      --text: #f0f0f2;
+      --muted: #b8aec9;
+      --accent: #b388eb;
+      --line: rgba(255,255,255,.08);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Inter, system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 40px 20px;
+      line-height: 1.6;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .container { max-width: 450px; width: 100%; }
+    
+    .header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+    .logo {
+      font-size: 40px;
+      margin-bottom: 10px;
+    }
+    .header h1 {
+      font-size: 28px;
+      margin-bottom: 8px;
+      color: var(--accent);
+    }
+    .header .subtitle {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .form-box {
+      background: rgba(255,255,255,.02);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 30px;
+    }
+    
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 500;
+      font-size: 14px;
+    }
+    
+    input {
+      width: 100%;
+      padding: 12px;
+      background: rgba(255,255,255,.05);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 14px;
+      margin-bottom: 20px;
+    }
+    input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    
+    .btn {
+      width: 100%;
+      padding: 14px;
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    .btn:hover { opacity: 0.9; }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    .error-message {
+      display: none;
+      padding: 12px;
+      background: rgba(244,67,54,.1);
+      border: 1px solid #f44336;
+      border-radius: 8px;
+      color: #f44336;
+      margin-top: 15px;
+      font-size: 14px;
+    }
+    .error-message.show { display: block; }
+    
+    .back-link {
+      text-align: center;
+      margin-top: 20px;
+    }
+    .back-link a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 14px;
+    }
+    .back-link a:hover {
+      color: var(--accent);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="logo">✦</div>
+      <h1>Connexion</h1>
+      <div class="subtitle">Académie de la Lumière</div>
+    </div>
+
+    <div class="form-box">
+      <form id="login-form">
+        <div>
+          <label for="email">Email</label>
+          <input type="email" id="email" required placeholder="votre@email.com" autocomplete="email">
+        </div>
+
+        <div>
+          <label for="password">Mot de passe</label>
+          <input type="password" id="password" required placeholder="••••••••" autocomplete="current-password">
+        </div>
+
+        <button type="submit" class="btn" id="submit-btn">
+          Se connecter
+        </button>
+
+        <div id="error-message" class="error-message"></div>
+      </form>
+    </div>
+
+    <div class="back-link">
+      <a href="/">← Retour à l'accueil</a>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
+  <script>
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const submitBtn = document.getElementById('submit-btn');
+      const errorMsg = document.getElementById('error-message');
+      
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Connexion...';
+      errorMsg.classList.remove('show');
+      
+      const formData = {
+        email: document.getElementById('email').value,
+        password: document.getElementById('password').value
+      };
+
+      try {
+        const response = await axios.post('/api/auth/login', formData);
+        
+        if (response.data.success) {
+          // Stocker le token
+          localStorage.setItem('token', response.data.token);
+          localStorage.setItem('user', JSON.stringify(response.data.user));
+          
+          // Rediriger selon le rôle
+          const role = response.data.user.role;
+          if (role === 'super_admin') {
+            window.location.href = '/admin/dashboard';
+          } else if (role === 'guide') {
+            window.location.href = '/guide/dashboard';
+          } else {
+            window.location.href = '/client/dashboard';
+          }
+        }
+      } catch (error) {
+        console.error('Erreur:', error);
+        errorMsg.textContent = error.response?.data?.error || 'Erreur lors de la connexion';
+        errorMsg.classList.add('show');
+        
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Se connecter';
+      }
+    });
+  </script>
+</body>
+</html>`)
 })
 
 // Route: Mon Manifeste (formulaire de soumission du manifeste)
@@ -2164,8 +2596,8 @@ app.get('/', (c) => {
             </div>
             <ul class="pricing-features">
               <li>✓ 3 entretiens (45 min chacun sur 4-6 semaines)</li>
-              <li>✓ 2 Peteks personnalisés</li>
-              <li>✓ 3-5 Psaumes adaptés à votre parcours</li>
+              <li>✓ Peteks personnalisés</li>
+              <li>✓ Psaumes adaptés à votre parcours</li>
               <li>✓ Attribution d'un Ange gardien</li>
               <li>✓ Accès complet à la plateforme</li>
               <li>✓ Suivi personnalisé</li>
