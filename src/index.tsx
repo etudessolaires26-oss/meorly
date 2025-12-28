@@ -809,6 +809,332 @@ app.get('/admin', async (c) => {
   }
 })
 
+// Route: Mon Manifeste (formulaire de soumission du manifeste)
+app.get('/mon-manifeste/:inscription_id', async (c) => {
+  const { env } = c;
+  const inscription_id = c.req.param('inscription_id');
+  
+  try {
+    // Vérifier que l'utilisateur existe
+    const inscription = await env.DB.prepare(`
+      SELECT * FROM inscriptions WHERE id = ?
+    `).bind(inscription_id).first();
+
+    if (!inscription) {
+      return c.text('Utilisateur non trouvé', 404);
+    }
+
+    // Vérifier si un manifeste existe déjà
+    const existingManifeste = await env.DB.prepare(`
+      SELECT * FROM manifestes WHERE inscription_id = ? LIMIT 1
+    `).bind(inscription_id).first();
+
+    return c.html(`<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mon Manifeste - ${inscription.prenom} ${inscription.nom}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0a0a0f;
+      --text: #f0f0f2;
+      --muted: #b8aec9;
+      --accent: #b388eb;
+      --line: rgba(255,255,255,.08);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Inter, system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 40px 20px;
+      line-height: 1.6;
+    }
+    .container { max-width: 700px; margin: 0 auto; }
+    
+    .header {
+      text-align: center;
+      margin-bottom: 40px;
+      padding-bottom: 30px;
+      border-bottom: 1px solid var(--line);
+    }
+    .header h1 {
+      font-size: 32px;
+      margin-bottom: 8px;
+      color: var(--accent);
+    }
+    .header .subtitle {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .form-box {
+      background: rgba(255,255,255,.02);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 30px;
+    }
+    
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 500;
+      font-size: 14px;
+    }
+    
+    input, select, textarea {
+      width: 100%;
+      padding: 12px;
+      background: rgba(255,255,255,.05);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 14px;
+      margin-bottom: 20px;
+    }
+    
+    textarea {
+      min-height: 150px;
+      resize: vertical;
+    }
+    
+    .btn {
+      width: 100%;
+      padding: 14px;
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    .btn:hover { opacity: 0.9; }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    .success-message {
+      display: none;
+      padding: 15px;
+      background: rgba(76,175,80,.1);
+      border: 1px solid #4caf50;
+      border-radius: 8px;
+      color: #4caf50;
+      margin-top: 20px;
+      text-align: center;
+    }
+    .success-message.show { display: block; }
+    
+    .error-message {
+      display: none;
+      padding: 15px;
+      background: rgba(244,67,54,.1);
+      border: 1px solid #f44336;
+      border-radius: 8px;
+      color: #f44336;
+      margin-top: 20px;
+      text-align: center;
+    }
+    .error-message.show { display: block; }
+    
+    .info-box {
+      background: rgba(179,136,235,.1);
+      border: 1px solid rgba(179,136,235,.3);
+      border-radius: 8px;
+      padding: 15px;
+      margin-bottom: 30px;
+      font-size: 14px;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Votre Manifeste Spirituel</h1>
+      <div class="subtitle">Bienvenue ${inscription.prenom} ${inscription.nom}</div>
+    </div>
+
+    ${existingManifeste ? `
+      <div class="info-box">
+        <strong>✓ Votre manifeste a déjà été soumis</strong><br>
+        <span style="font-size: 13px; margin-top: 8px; display: block;">
+          Votre pratique spirituelle a été analysée et personnalisée. 
+          <a href="/mon-parcours/${inscription_id}" 
+             style="color: var(--accent); text-decoration: underline; font-weight: 500;">
+            Accédez à votre parcours spirituel →
+          </a>
+        </span>
+      </div>
+    ` : ''}
+
+    <div class="info-box">
+      <strong>📝 Pourquoi un manifeste ?</strong><br>
+      Votre manifeste nous permet de comprendre votre situation et vos aspirations spirituelles. 
+      En fonction de vos réponses, nous vous attribuerons un <strong>Petek personnalisé</strong>, 
+      des <strong>Psaumes adaptés</strong> et des <strong>Anges protecteurs</strong> pour vous guider.
+    </div>
+
+    <div class="form-box">
+      <form id="manifeste-form">
+        <div>
+          <label for="theme">Thème principal *</label>
+          <select id="theme" required>
+            <option value="">-- Choisissez un thème --</option>
+            <option value="paix">Paix intérieure</option>
+            <option value="amour">Amour & Relations</option>
+            <option value="reussite">Réussite & Abondance</option>
+            <option value="sante">Santé & Vitalité</option>
+            <option value="protection">Protection & Sécurité</option>
+            <option value="sagesse">Sagesse & Clarté</option>
+            <option value="autre">Autre</option>
+          </select>
+        </div>
+
+        <div id="theme-autre-box" style="display: none;">
+          <label for="theme_autre">Précisez votre thème</label>
+          <input type="text" id="theme_autre" placeholder="Ex: Guérison émotionnelle, pardon...">
+        </div>
+
+        <div>
+          <label for="content">Décrivez votre situation *</label>
+          <textarea 
+            id="content" 
+            required
+            placeholder="Parlez-nous de votre situation actuelle, vos défis, vos aspirations spirituelles..."></textarea>
+        </div>
+
+        <div>
+          <label for="question1">Votre situation actuelle</label>
+          <textarea 
+            id="question1" 
+            placeholder="Comment décririez-vous votre état émotionnel et spirituel actuel ?"
+            style="min-height: 100px;"></textarea>
+        </div>
+
+        <div>
+          <label for="question2">Vos aspirations</label>
+          <textarea 
+            id="question2" 
+            placeholder="Que souhaitez-vous atteindre ou transformer dans votre vie ?"
+            style="min-height: 100px;"></textarea>
+        </div>
+
+        <button type="submit" class="btn" id="submit-btn">
+          Soumettre mon manifeste
+        </button>
+
+        <div id="success-message" class="success-message"></div>
+        <div id="error-message" class="error-message"></div>
+      </form>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
+  <script>
+    const inscriptionId = ${inscription_id};
+    
+    // Show/hide theme_autre field
+    document.getElementById('theme').addEventListener('change', (e) => {
+      const themeAutreBox = document.getElementById('theme-autre-box');
+      if (e.target.value === 'autre') {
+        themeAutreBox.style.display = 'block';
+      } else {
+        themeAutreBox.style.display = 'none';
+      }
+    });
+
+    // Handle form submission
+    document.getElementById('manifeste-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const submitBtn = document.getElementById('submit-btn');
+      const successMsg = document.getElementById('success-message');
+      const errorMsg = document.getElementById('error-message');
+      
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Envoi en cours...';
+      
+      const formData = {
+        inscription_id: inscriptionId,
+        theme: document.getElementById('theme').value,
+        theme_autre: document.getElementById('theme_autre').value || null,
+        content: document.getElementById('content').value,
+        reponses: []
+      };
+      
+      // Ajouter les questions/réponses si remplies
+      const q1 = document.getElementById('question1').value;
+      const q2 = document.getElementById('question2').value;
+      
+      if (q1) {
+        formData.reponses.push({
+          question: 'Votre situation actuelle',
+          reponse: q1
+        });
+      }
+      
+      if (q2) {
+        formData.reponses.push({
+          question: 'Vos aspirations',
+          reponse: q2
+        });
+      }
+
+      try {
+        // Soumettre le manifeste
+        const manifesteResponse = await axios.post('/api/manifeste', formData);
+        
+        if (manifesteResponse.data.success) {
+          const manifesteId = manifesteResponse.data.manifeste_id;
+          
+          // Analyser le manifeste
+          submitBtn.textContent = 'Analyse en cours...';
+          const analyseResponse = await axios.post('/api/analyze-manifeste', { 
+            manifeste_id: manifesteId 
+          });
+          
+          if (analyseResponse.data.success) {
+            successMsg.innerHTML = \`
+              <strong>✓ Manifeste soumis et analysé avec succès !</strong><br>
+              <span style="font-size: 13px; margin-top: 8px; display: block;">
+                Votre parcours spirituel a été personnalisé. Redirection en cours...
+              </span>
+            \`;
+            successMsg.classList.add('show');
+            
+            // Redirect to parcours after 2 seconds
+            setTimeout(() => {
+              window.location.href = '/mon-parcours/' + inscriptionId;
+            }, 2000);
+          } else {
+            throw new Error('Erreur lors de l\'analyse');
+          }
+        }
+      } catch (error) {
+        console.error('Erreur:', error);
+        errorMsg.textContent = 'Une erreur est survenue. Veuillez réessayer.';
+        errorMsg.classList.add('show');
+        
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Soumettre mon manifeste';
+      }
+    });
+  </script>
+</body>
+</html>`);
+  } catch (error) {
+    console.error('Erreur récupération manifeste:', error);
+    return c.text('Erreur serveur', 500);
+  }
+})
+
 // Route: Mon Parcours Spirituel (affichage du Petek, Psaumes, Anges et Rituel)
 app.get('/mon-parcours/:inscription_id', async (c) => {
   const { env } = c;
@@ -1831,20 +2157,37 @@ app.get('/', (c) => {
         const response = await axios.post('/api/inscription', formData);
         
         if (response.data.success) {
-          // Show success message
-          document.getElementById('success-message').classList.add('show');
+          const inscriptionId = response.data.id;
+          
+          // Show success message with link to manifeste
+          const successMsg = document.getElementById('success-message');
+          successMsg.innerHTML = 
+            '<strong>✓ Inscription réussie !</strong><br>' +
+            '<span style="font-size: 14px; margin-top: 8px; display: block;">' +
+            'Passez maintenant à l\'étape suivante : ' +
+            '<a href="/mon-manifeste/' + inscriptionId + '" ' +
+            'style="color: #b388eb; text-decoration: underline; font-weight: 500;">' +
+            'rédiger votre manifeste spirituel →' +
+            '</a>' +
+            '</span>';
+          successMsg.classList.add('show');
           
           // Reset form
           e.target.reset();
           
-          // Hide success message after 5 seconds
+          // Auto redirect after 3 seconds
           setTimeout(() => {
-            document.getElementById('success-message').classList.remove('show');
-          }, 5000);
+            window.location.href = '/mon-manifeste/' + inscriptionId;
+          }, 3000);
         }
       } catch (error) {
         console.error('Erreur lors de l\'inscription:', error);
-        alert('Une erreur est survenue. Veuillez réessayer.');
+        
+        if (error.response?.status === 409) {
+          alert('Cet email est déjà inscrit. Veuillez utiliser un autre email.');
+        } else {
+          alert('Une erreur est survenue. Veuillez réessayer.');
+        }
       }
     });
 
