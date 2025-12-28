@@ -3941,7 +3941,7 @@ app.get('/', (c) => {
               <li>✓ Accès illimité à l'application</li>
               <li>✓ Support par message</li>
             </ul>
-            <a href="#inscription" class="btn" style="width: 100%; margin-top: auto;">Commencer</a>
+            <a href="/inscription" class="btn" style="width: 100%; margin-top: auto;">Commencer</a>
           </div>
 
           <!-- Formule Psaumes -->
@@ -3962,7 +3962,7 @@ app.get('/', (c) => {
               <li>✓ Accès complet à la plateforme</li>
               <li>✓ Suivi personnalisé</li>
             </ul>
-            <a href="#inscription" class="btn btn-primary" style="width: 100%; margin-top: auto;">Choisir cette formule</a>
+            <a href="/inscription" class="btn btn-primary" style="width: 100%; margin-top: auto;">Choisir cette formule</a>
           </div>
 
           <!-- Formule Intégral -->
@@ -3983,7 +3983,7 @@ app.get('/', (c) => {
               <li>✓ Support prioritaire par message</li>
               <li>✓ Ajustements continus</li>
             </ul>
-            <a href="#inscription" class="btn" style="width: 100%; margin-top: auto;">S'engager 6 mois</a>
+            <a href="/inscription" class="btn" style="width: 100%; margin-top: auto;">S'engager 6 mois</a>
           </div>
 
         </div>
