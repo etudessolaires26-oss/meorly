@@ -155,35 +155,37 @@ async function assignPsalmsToUser(db: D1Database, inscription_id: number, keywor
  */
 async function assignAngelsToUser(db: D1Database, inscription_id: number, keywords: string[]): Promise<any[]> {
   const angels: any[] = [];
+  const assignedAngelIds: number[] = [];
   
   // Chercher des anges correspondants via les règles
   for (const keyword of keywords.slice(0, 2)) { // Limiter à 2 anges
     const rule = await db.prepare(`
-      SELECT ar.*, a.name_fr, a.name_he, a.description_fr, a.tradition_source
+      SELECT ar.*, a.id as angel_id, a.slug, a.name_fr, a.name_he, a.description_fr, a.tradition_source
       FROM angel_rules ar
-      JOIN angels a ON ar.angel_slug = a.slug
-      WHERE ar.tags LIKE ?
+      JOIN angels a ON ar.angel_id = a.id
+      WHERE ar.condition_tags LIKE ?
       ORDER BY ar.priority ASC, RANDOM()
       LIMIT 1
     `).bind(`%${keyword}%`).first();
     
-    if (rule && !angels.find(a => a.slug === rule.angel_slug)) {
+    if (rule && !assignedAngelIds.includes(rule.angel_id as number)) {
       angels.push(rule);
+      assignedAngelIds.push(rule.angel_id as number);
       
       // Créer une attribution
       await db.prepare(`
-        INSERT INTO user_angels (inscription_id, angel_slug, assigned_via)
-        VALUES (?, ?, 'auto')
-      `).bind(inscription_id, rule.angel_slug).run();
+        INSERT INTO user_angels (inscription_id, angel_id, rank_assigned)
+        VALUES (?, ?, ?)
+      `).bind(inscription_id, rule.angel_id, angels.length).run();
     }
   }
   
   // Si aucun ange trouvé, attribuer Metatron par défaut
   if (angels.length === 0) {
     const metatron = await db.prepare(`
-      SELECT a.*, ar.description as rule_description
+      SELECT a.*, ar.condition_tags as rule_tags
       FROM angels a
-      LEFT JOIN angel_rules ar ON a.slug = ar.angel_slug
+      LEFT JOIN angel_rules ar ON a.id = ar.angel_id
       WHERE a.slug = 'metatron'
       LIMIT 1
     `).first();
@@ -191,9 +193,9 @@ async function assignAngelsToUser(db: D1Database, inscription_id: number, keywor
     if (metatron) {
       angels.push(metatron);
       await db.prepare(`
-        INSERT INTO user_angels (inscription_id, angel_slug, assigned_via)
-        VALUES (?, 'metatron', 'default')
-      `).bind(inscription_id).run();
+        INSERT INTO user_angels (inscription_id, angel_id, rank_assigned)
+        VALUES (?, ?, 1)
+      `).bind(inscription_id, metatron.id).run();
     }
   }
   
@@ -254,6 +256,8 @@ app.post('/api/analyze-manifeste', async (c) => {
     const body = await c.req.json();
     const { manifeste_id } = body;
 
+    console.log('[1] Début analyse manifeste:', manifeste_id);
+
     if (!manifeste_id) {
       return c.json({ 
         success: false, 
@@ -262,6 +266,7 @@ app.post('/api/analyze-manifeste', async (c) => {
     }
 
     // Récupérer le manifeste
+    console.log('[2] Récupération manifeste...');
     const manifeste = await env.DB.prepare(`
       SELECT m.*, i.prenom, i.nom 
       FROM manifestes m
@@ -270,43 +275,70 @@ app.post('/api/analyze-manifeste', async (c) => {
     `).bind(manifeste_id).first();
 
     if (!manifeste) {
+      console.log('[2] Manifeste non trouvé');
       return c.json({ 
         success: false, 
         error: 'Manifeste non trouvé' 
       }, 404);
     }
 
+    console.log('[2] Manifeste trouvé:', {
+      id: manifeste.id,
+      inscription_id: manifeste.inscription_id,
+      theme: manifeste.theme
+    });
+
     // Construire le texte complet
+    console.log('[3] Construction texte complet...');
     let fullText = `Thème: ${manifeste.theme}\n`;
-    if (manifeste.theme_autre) {
+    if (manifeste.theme_autre && manifeste.theme_autre !== 'null') {
       fullText += `Thème personnalisé: ${manifeste.theme_autre}\n`;
     }
     if (manifeste.content) {
       fullText += `Contenu: ${manifeste.content}\n`;
     }
-    if (manifeste.reponses) {
-      const reponses = JSON.parse(manifeste.reponses as string);
-      for (const r of reponses) {
-        if (r.question && r.reponse) {
-          fullText += `Q: ${r.question}\nR: ${r.reponse}\n`;
+    if (manifeste.reponses && manifeste.reponses !== 'null') {
+      try {
+        const reponses = JSON.parse(manifeste.reponses as string);
+        for (const r of reponses) {
+          if (r.question && r.reponse) {
+            fullText += `Q: ${r.question}\nR: ${r.reponse}\n`;
+          }
         }
+      } catch (parseError) {
+        console.error('[3] Erreur parsing reponses:', parseError);
       }
     }
 
+    console.log('[3] Texte complet construit:', fullText.substring(0, 100) + '...');
+
     // Analyser et extraire les mots-clés
+    console.log('[4] Analyse mots-clés...');
     const keywords = analyzeManifeste(fullText);
+    console.log('[4] Keywords détectés:', keywords);
 
     // Attribuer Petek, Psaumes et Anges
-    const petek = await assignPetekToUser(env.DB, manifeste.inscription_id as number, keywords);
-    const psalms = await assignPsalmsToUser(env.DB, manifeste.inscription_id as number, keywords);
-    const angels = await assignAngelsToUser(env.DB, manifeste.inscription_id as number, keywords);
+    console.log('[5] Attribution Petek...');
+    const petek = await assignPetekToUser(env.DB, Number(manifeste.inscription_id), keywords);
+    console.log('[5] Petek attribué:', petek?.code);
+
+    console.log('[6] Attribution Psaumes...');
+    const psalms = await assignPsalmsToUser(env.DB, Number(manifeste.inscription_id), keywords);
+    console.log('[6] Psaumes attribués:', psalms.length);
+
+    console.log('[7] Attribution Anges...');
+    const angels = await assignAngelsToUser(env.DB, Number(manifeste.inscription_id), keywords);
+    console.log('[7] Anges attribués:', angels.length);
 
     // Mettre à jour le statut du manifeste
+    console.log('[8] Mise à jour statut manifeste...');
     await env.DB.prepare(`
       UPDATE manifestes 
       SET status = 'analyzed', updated_at = CURRENT_TIMESTAMP 
       WHERE id = ?
     `).bind(manifeste_id).run();
+
+    console.log('[9] Analyse terminée avec succès');
 
     return c.json({ 
       success: true,
@@ -318,10 +350,11 @@ app.post('/api/analyze-manifeste', async (c) => {
     });
 
   } catch (error) {
-    console.error('Erreur analyse manifeste:', error);
+    console.error('❌ Erreur analyse manifeste:', error);
+    console.error('Stack:', (error as Error).stack);
     return c.json({ 
       success: false, 
-      error: 'Erreur lors de l\'analyse du manifeste' 
+      error: `Erreur lors de l'analyse: ${(error as Error).message}` 
     }, 500);
   }
 });
@@ -384,8 +417,8 @@ app.get('/api/user/:inscription_id/psalms', async (c) => {
       SELECT 
         up.*,
         p.number, p.title_fr, p.title_he,
-        p.verse_fr, p.verse_he, p.verse_translit,
-        p.theme, p.tags, p.tradition_note
+        p.text_fr, p.text_he, p.text_translit,
+        p.theme, p.tags, p.duration_min, p.level, p.guide_comment
       FROM user_psalms up
       JOIN psalms p ON up.psalm_id = p.id
       WHERE up.inscription_id = ? AND up.status = 'active'
@@ -416,12 +449,12 @@ app.get('/api/user/:inscription_id/angels', async (c) => {
     const { results } = await env.DB.prepare(`
       SELECT 
         ua.*,
-        a.name_fr, a.name_he, a.rank_order,
+        a.slug, a.name_fr, a.name_he, a.rank_order,
         a.description_fr, a.tradition_source, a.level, a.tags
       FROM user_angels ua
-      JOIN angels a ON ua.angel_slug = a.slug
+      JOIN angels a ON ua.angel_id = a.id
       WHERE ua.inscription_id = ?
-      ORDER BY a.rank_order ASC
+      ORDER BY ua.rank_assigned ASC
     `).bind(inscription_id).all();
 
     return c.json({ 
