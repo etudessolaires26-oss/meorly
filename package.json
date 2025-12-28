@@ -22,6 +22,7 @@
     "git:log": "git log --oneline"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "hono": "^4.11.3"
   },
   "devDependencies": {

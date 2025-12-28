@@ -1843,6 +1843,77 @@ app.get('/', (c) => {
       }
     }
 
+    /* Pricing Cards */
+    .pricing-card {
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: var(--r);
+      padding: 24px;
+      background: rgba(255,255,255,.02);
+      transition: all 0.3s ease;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+    .pricing-card:hover {
+      border-color: rgba(179,136,235,.3);
+      background: rgba(255,255,255,.04);
+      transform: translateY(-5px);
+    }
+    .pricing-featured {
+      border-color: rgba(179,136,235,.4);
+      background: rgba(179,136,235,.08);
+    }
+    .pricing-badge {
+      position: absolute;
+      top: -12px;
+      right: 20px;
+      background: var(--accent);
+      color: white;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .pricing-header {
+      margin-bottom: 20px;
+      border-bottom: 1px solid rgba(255,255,255,.08);
+      padding-bottom: 20px;
+    }
+    .pricing-header h3 {
+      margin: 0 0 12px 0;
+      font-size: 22px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .pricing-price {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .price-amount {
+      font-size: 36px;
+      font-weight: 700;
+      color: var(--accent);
+      line-height: 1;
+    }
+    .price-period {
+      font-size: 13px;
+      color: var(--muted2);
+    }
+    .pricing-features {
+      list-style: none;
+      padding: 0;
+      margin: 0 0 24px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .pricing-features li {
+      font-size: 14px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
     /* Responsive */
     @media (min-width: 920px){
       nav{display:flex}
@@ -1882,6 +1953,7 @@ app.get('/', (c) => {
           <a href="#verite">La vérité</a>
           <a href="#approche">Approche</a>
           <a href="#parcours">Parcours</a>
+          <a href="#tarifs">Tarifs</a>
           <a href="#bienfaits">Bienfaits</a>
           <a href="#limites">Limites</a>
         </nav>
@@ -2047,6 +2119,86 @@ app.get('/', (c) => {
         <div class="ctaRow" style="margin-top:18px;">
           <a class="btn btn-primary" href="#inscription">Prêt à commencer ? S'inscrire gratuitement</a>
         </div>
+      </div>
+    </section>
+
+    <!-- TARIFS -->
+    <section id="tarifs">
+      <div class="wrap">
+        <div class="kicker">Transparence totale</div>
+        <h2>Nos formules</h2>
+        <p class="lead">
+          Trois parcours adaptés à votre besoin. Un seul engagement : vous accompagner avec clarté.
+        </p>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-top: 40px;">
+          
+          <!-- Formule Essentiel -->
+          <div class="pricing-card">
+            <div class="pricing-header">
+              <h3>Petek Essentiel</h3>
+              <div class="pricing-price">
+                <span class="price-amount">175€</span>
+                <span class="price-period">paiement unique</span>
+              </div>
+            </div>
+            <ul class="pricing-features">
+              <li>✓ 1 entretien initial (45 min)</li>
+              <li>✓ Analyse personnalisée de votre besoin</li>
+              <li>✓ 1 Petek sur mesure</li>
+              <li>✓ Accès illimité à l'application</li>
+              <li>✓ Support par message</li>
+            </ul>
+            <a href="#inscription" class="btn" style="width: 100%; margin-top: auto;">Commencer</a>
+          </div>
+
+          <!-- Formule Psaumes -->
+          <div class="pricing-card pricing-featured">
+            <div class="pricing-badge">Recommandé</div>
+            <div class="pricing-header">
+              <h3>Petek & Psaumes</h3>
+              <div class="pricing-price">
+                <span class="price-amount">495€</span>
+                <span class="price-period">paiement unique</span>
+              </div>
+            </div>
+            <ul class="pricing-features">
+              <li>✓ 3 entretiens (45 min chacun sur 4-6 semaines)</li>
+              <li>✓ 2 Peteks personnalisés</li>
+              <li>✓ 3-5 Psaumes adaptés à votre parcours</li>
+              <li>✓ Attribution d'un Ange gardien</li>
+              <li>✓ Accès complet à la plateforme</li>
+              <li>✓ Suivi personnalisé</li>
+            </ul>
+            <a href="#inscription" class="btn btn-primary" style="width: 100%; margin-top: auto;">Choisir cette formule</a>
+          </div>
+
+          <!-- Formule Intégral -->
+          <div class="pricing-card">
+            <div class="pricing-header">
+              <h3>Parcours Intégral</h3>
+              <div class="pricing-price">
+                <span class="price-amount">1 500€</span>
+                <span class="price-period">sur 6 mois (ou 3×500€)</span>
+              </div>
+            </div>
+            <ul class="pricing-features">
+              <li>✓ Accès illimité au guide pendant 6 mois</li>
+              <li>✓ 2+ entretiens par mois</li>
+              <li>✓ Peteks illimités selon votre évolution</li>
+              <li>✓ Psaumes évolutifs personnalisés</li>
+              <li>✓ Manifeste de vie complet</li>
+              <li>✓ Support prioritaire par message</li>
+              <li>✓ Ajustements continus</li>
+            </ul>
+            <a href="#inscription" class="btn" style="width: 100%; margin-top: auto;">S'engager 6 mois</a>
+          </div>
+
+        </div>
+
+        <p class="hint" style="text-align: center; margin-top: 30px;">
+          Premier entretien gratuit pour tous. Vous ne payez qu'après validation mutuelle.
+        </p>
       </div>
     </section>
 
