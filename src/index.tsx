@@ -91,6 +91,187 @@ app.get('/api/inscriptions', async (c) => {
   }
 })
 
+// Page Admin - Liste des inscriptions
+app.get('/admin', async (c) => {
+  const { env } = c;
+  
+  try {
+    const { results } = await env.DB.prepare(
+      'SELECT * FROM inscriptions ORDER BY created_at DESC'
+    ).all();
+
+    return c.html(`<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Admin - Académie de la Lumière</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#0a0a0f;
+      --text:#f0f0f2;
+      --muted:#b8aec9;
+      --accent:#b388eb;
+      --line: rgba(255,255,255,.08);
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family: Inter, system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 40px 20px;
+    }
+    .container{max-width: 1200px; margin: 0 auto;}
+    h1{
+      font-size: 28px;
+      margin: 0 0 8px;
+      color: var(--accent);
+    }
+    .subtitle{
+      color: var(--muted);
+      margin-bottom: 30px;
+    }
+    .stats{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 30px;
+    }
+    .stat-card{
+      background: rgba(255,255,255,.02);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .stat-value{
+      font-size: 32px;
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 4px;
+    }
+    .stat-label{
+      color: var(--muted);
+      font-size: 14px;
+    }
+    table{
+      width: 100%;
+      border-collapse: collapse;
+      background: rgba(255,255,255,.02);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    th, td{
+      padding: 14px;
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+    }
+    th{
+      background: rgba(179,136,235,.1);
+      font-weight: 600;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--accent);
+    }
+    tr:last-child td{border-bottom: none}
+    tr:hover{background: rgba(255,255,255,.03)}
+    .status{
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .status-pending{
+      background: rgba(255,193,7,.15);
+      color: #ffc107;
+    }
+    .status-contacted{
+      background: rgba(76,175,80,.15);
+      color: #4caf50;
+    }
+    .btn{
+      display: inline-block;
+      padding: 10px 16px;
+      background: var(--accent);
+      color: #0a0a0f;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+      margin-bottom: 20px;
+    }
+    .btn:hover{
+      opacity: 0.9;
+    }
+    @media (max-width: 768px){
+      table{font-size: 13px}
+      th, td{padding: 10px}
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📊 Admin Dashboard</h1>
+    <p class="subtitle">Académie de la Lumière - Gestion des inscriptions</p>
+    
+    <div class="stats">
+      <div class="stat-card">
+        <div class="stat-value">${results.length}</div>
+        <div class="stat-label">Total inscriptions</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${results.filter(r => r.status === 'pending').length}</div>
+        <div class="stat-label">En attente</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${results.filter(r => r.status === 'contacted').length}</div>
+        <div class="stat-label">Contactés</div>
+      </div>
+    </div>
+
+    <a href="/" class="btn">← Retour à l'accueil</a>
+    
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Nom</th>
+          <th>Email</th>
+          <th>Téléphone</th>
+          <th>Objectif</th>
+          <th>Date</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${results.map(r => `
+          <tr>
+            <td>${r.id}</td>
+            <td>${r.prenom} ${r.nom}</td>
+            <td>${r.email}</td>
+            <td>${r.tel || '-'}</td>
+            <td>${r.objectif || '-'}</td>
+            <td>${new Date(r.created_at).toLocaleDateString('fr-FR')}</td>
+            <td><span class="status status-${r.status}">${r.status}</span></td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>`)
+  } catch (error) {
+    console.error('Erreur admin:', error);
+    return c.html('<h1>Erreur lors du chargement des données</h1>')
+  }
+})
+
 // Main landing page
 app.get('/', (c) => {
   return c.html(`<!doctype html>
