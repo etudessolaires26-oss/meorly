@@ -838,6 +838,81 @@ app.post('/api/inscription-step1', async (c) => {
   }
 });
 
+// API Questionnaire - Enregistrer les thèmes et réponses dans manifestes
+app.post('/api/questionnaire', async (c) => {
+  const { env } = c;
+  try {
+    const { inscription_id, themes, responses } = await c.req.json();
+
+    // Validation
+    if (!inscription_id || !themes || !responses) {
+      return c.json({ 
+        success: false, 
+        error: 'Données incomplètes' 
+      }, 400);
+    }
+
+    // Vérifier que l'inscription existe
+    const inscription = await env.DB.prepare(`
+      SELECT id, status FROM inscriptions WHERE id = ?
+    `).bind(inscription_id).first();
+
+    if (!inscription) {
+      return c.json({ 
+        success: false, 
+        error: 'Inscription introuvable' 
+      }, 404);
+    }
+
+    if (inscription.status !== 'pending_appointment') {
+      return c.json({ 
+        success: false, 
+        error: 'Ce questionnaire a déjà été complété' 
+      }, 400);
+    }
+
+    // Construire le contenu du manifeste
+    const themeLabels = {
+      paix: 'Paix intérieure',
+      amour: 'Amour & Relations',
+      reussite: 'Réussite & Abondance',
+      sante: 'Santé & Vitalité',
+      protection: 'Protection & Sécurité',
+      sagesse: 'Sagesse & Clarté'
+    };
+
+    const manifesteText = themes.map(theme => {
+      return '**' + themeLabels[theme] + '**\n' + responses[theme];
+    }).join('\n\n');
+
+    // Préparer JSON des réponses
+    const responsesJson = JSON.stringify(responses);
+
+    // Insérer dans manifestes
+    await env.DB.prepare(`
+      INSERT INTO manifestes (inscription_id, theme, reponses, content, status)
+      VALUES (?, ?, ?, ?, 'submitted')
+    `).bind(
+      inscription_id,
+      themes.join(', '),
+      responsesJson,
+      manifesteText
+    ).run();
+
+    return c.json({
+      success: true,
+      message: 'Questionnaire enregistré avec succès'
+    });
+
+  } catch (error) {
+    console.error('Erreur questionnaire API:', error);
+    return c.json({ 
+      success: false, 
+      error: 'Une erreur est survenue lors de l\'enregistrement' 
+    }, 500);
+  }
+});
+
 // API Inscription - Créer une demande de rendez-vous
 app.post('/api/inscription', async (c) => {
   const { env } = c;
@@ -1315,6 +1390,432 @@ app.get('/inscription', (c) => {
 </body>
 </html>`)
 })
+
+// =============================================
+// QUESTIONNAIRE PAGE
+// =============================================
+
+// Route: Questionnaire avec choix de thèmes et questions dynamiques
+app.get('/questionnaire/:id', async (c) => {
+  const { env } = c;
+  const inscriptionId = c.req.param('id');
+
+  try {
+    // Récupérer l'inscription
+    const inscription = await env.DB.prepare(`
+      SELECT id, prenom, nom, email, status 
+      FROM inscriptions 
+      WHERE id = ?
+    `).bind(inscriptionId).first();
+
+    if (!inscription) {
+      return c.html('<h1>Inscription introuvable</h1>');
+    }
+
+    if (inscription.status !== 'pending_appointment') {
+      return c.html('<h1>Ce questionnaire a déjà été complété</h1>');
+    }
+
+    return c.html(`<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Questionnaire - Académie de la Lumière</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #0f0f1e 100%);
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+    .container {
+      background: white;
+      border-radius: 16px;
+      padding: 48px;
+      max-width: 800px;
+      margin: 0 auto;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    h1 {
+      font-size: 32px;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin-bottom: 12px;
+    }
+    .subtitle {
+      color: #666;
+      margin-bottom: 40px;
+      font-size: 16px;
+    }
+    .step {
+      margin-bottom: 40px;
+      padding: 24px;
+      background: #f8f9fa;
+      border-radius: 12px;
+      border-left: 4px solid #4a90e2;
+    }
+    .step.hidden { display: none; }
+    .step-title {
+      font-size: 20px;
+      font-weight: 600;
+      color: #1a1a2e;
+      margin-bottom: 8px;
+    }
+    .step-description {
+      color: #666;
+      margin-bottom: 20px;
+      font-size: 14px;
+    }
+    .themes-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 16px;
+    }
+    .theme-option {
+      padding: 16px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.3s;
+      background: white;
+    }
+    .theme-option:hover {
+      border-color: #4a90e2;
+      background: #f0f8ff;
+    }
+    .theme-option.selected {
+      border-color: #4a90e2;
+      background: #e3f2fd;
+    }
+    .theme-option input[type="checkbox"] {
+      margin-right: 12px;
+      width: 20px;
+      height: 20px;
+      cursor: pointer;
+    }
+    .theme-option label {
+      font-size: 16px;
+      font-weight: 600;
+      color: #333;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+    }
+    .theme-icon {
+      font-size: 24px;
+      margin-right: 12px;
+    }
+    .question-group {
+      margin-bottom: 24px;
+    }
+    .question-label {
+      display: block;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 8px;
+      font-size: 16px;
+    }
+    textarea {
+      width: 100%;
+      padding: 14px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 16px;
+      font-family: inherit;
+      resize: vertical;
+      min-height: 100px;
+      transition: border-color 0.3s;
+    }
+    textarea:focus {
+      outline: none;
+      border-color: #4a90e2;
+    }
+    .btn {
+      padding: 16px 32px;
+      background: #4a90e2;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+    .btn:hover { background: #357abd; }
+    .btn:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .btn-secondary {
+      background: #6c757d;
+    }
+    .btn-secondary:hover { background: #5a6268; }
+    .message {
+      padding: 16px;
+      border-radius: 8px;
+      margin-bottom: 24px;
+      display: none;
+    }
+    .message.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+    .button-group {
+      display: flex;
+      gap: 16px;
+      margin-top: 32px;
+    }
+    .counter {
+      font-size: 14px;
+      color: #666;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📋 Votre Questionnaire Spirituel</h1>
+    <p class="subtitle">Bonjour <strong>${inscription.prenom}</strong>, répondez à quelques questions pour personnaliser votre parcours</p>
+
+    <div id="message" class="message"></div>
+
+    <form id="questionnaire-form">
+      <!-- Étape 1 : Choix des thèmes -->
+      <div class="step" id="step1">
+        <div class="step-title">Étape 1 : Choisissez vos thèmes spirituels</div>
+        <p class="step-description">Sélectionnez 1 ou 2 thèmes qui correspondent à vos besoins actuels</p>
+        
+        <div class="themes-grid">
+          <div class="theme-option" data-theme="paix">
+            <label>
+              <input type="checkbox" name="themes" value="paix">
+              <span class="theme-icon">🕊️</span>
+              <span>Paix intérieure</span>
+            </label>
+          </div>
+          
+          <div class="theme-option" data-theme="amour">
+            <label>
+              <input type="checkbox" name="themes" value="amour">
+              <span class="theme-icon">💝</span>
+              <span>Amour & Relations</span>
+            </label>
+          </div>
+          
+          <div class="theme-option" data-theme="reussite">
+            <label>
+              <input type="checkbox" name="themes" value="reussite">
+              <span class="theme-icon">🌟</span>
+              <span>Réussite & Abondance</span>
+            </label>
+          </div>
+          
+          <div class="theme-option" data-theme="sante">
+            <label>
+              <input type="checkbox" name="themes" value="sante">
+              <span class="theme-icon">💚</span>
+              <span>Santé & Vitalité</span>
+            </label>
+          </div>
+          
+          <div class="theme-option" data-theme="protection">
+            <label>
+              <input type="checkbox" name="themes" value="protection">
+              <span class="theme-icon">🛡️</span>
+              <span>Protection & Sécurité</span>
+            </label>
+          </div>
+          
+          <div class="theme-option" data-theme="sagesse">
+            <label>
+              <input type="checkbox" name="themes" value="sagesse">
+              <span class="theme-icon">🔮</span>
+              <span>Sagesse & Clarté</span>
+            </label>
+          </div>
+        </div>
+        
+        <p class="counter" id="theme-counter">0 thème(s) sélectionné(s) (maximum 2)</p>
+        
+        <div class="button-group">
+          <button type="button" class="btn" id="next-step" disabled>Continuer →</button>
+        </div>
+      </div>
+
+      <!-- Étape 2 : Questions dynamiques -->
+      <div class="step hidden" id="step2">
+        <div class="step-title">Étape 2 : Parlez-nous de vous</div>
+        <p class="step-description">Ces réponses nous aideront à personnaliser votre parcours spirituel</p>
+        
+        <div id="questions-container"></div>
+        
+        <div class="button-group">
+          <button type="button" class="btn btn-secondary" id="prev-step">← Retour</button>
+          <button type="submit" class="btn" id="submit-btn">Valider mon questionnaire</button>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
+  <script>
+    const inscriptionId = ${inscriptionId};
+    const form = document.getElementById('questionnaire-form');
+    const step1 = document.getElementById('step1');
+    const step2 = document.getElementById('step2');
+    const message = document.getElementById('message');
+    const themeCounter = document.getElementById('theme-counter');
+    const questionsContainer = document.getElementById('questions-container');
+    const nextBtn = document.getElementById('next-step');
+    const prevBtn = document.getElementById('prev-step');
+    const submitBtn = document.getElementById('submit-btn');
+
+    // Questions par thème
+    const themeQuestions = {
+      paix: {
+        icon: '🕊️',
+        title: 'Paix intérieure',
+        question: 'Qu\'est-ce qui perturbe votre paix intérieure actuellement ? Décrivez votre situation.'
+      },
+      amour: {
+        icon: '💝',
+        title: 'Amour & Relations',
+        question: 'Quelle relation souhaitez-vous améliorer ? (couple, famille, amitié...)'
+      },
+      reussite: {
+        icon: '🌟',
+        title: 'Réussite & Abondance',
+        question: 'Quel projet ou objectif est important pour vous en ce moment ?'
+      },
+      sante: {
+        icon: '💚',
+        title: 'Santé & Vitalité',
+        question: 'Comment vous sentez-vous physiquement et émotionnellement ? Quels défis rencontrez-vous ?'
+      },
+      protection: {
+        icon: '🛡️',
+        title: 'Protection & Sécurité',
+        question: 'De quoi souhaitez-vous être protégé(e) ? Qu\'est-ce qui vous inquiète ?'
+      },
+      sagesse: {
+        icon: '🔮',
+        title: 'Sagesse & Clarté',
+        question: 'Quelle décision ou choix vous préoccupe actuellement ?'
+      }
+    };
+
+    // Gestion des checkboxes
+    const checkboxes = document.querySelectorAll('input[name="themes"]');
+    const themeOptions = document.querySelectorAll('.theme-option');
+
+    checkboxes.forEach(checkbox => {
+      checkbox.addEventListener('change', () => {
+        const selected = document.querySelectorAll('input[name="themes"]:checked');
+        
+        // Limite à 2 thèmes
+        if (selected.length > 2) {
+          checkbox.checked = false;
+          return;
+        }
+
+        // Update visual
+        const parent = checkbox.closest('.theme-option');
+        if (checkbox.checked) {
+          parent.classList.add('selected');
+        } else {
+          parent.classList.remove('selected');
+        }
+
+        // Update counter
+        themeCounter.textContent = selected.length + ' thème(s) sélectionné(s) (maximum 2)';
+        
+        // Enable/disable button
+        nextBtn.disabled = selected.length === 0;
+      });
+    });
+
+    // Passer à l'étape 2
+    nextBtn.addEventListener('click', () => {
+      const selectedThemes = Array.from(document.querySelectorAll('input[name="themes"]:checked'))
+        .map(cb => cb.value);
+
+      // Générer les questions dynamiques
+      questionsContainer.innerHTML = selectedThemes.map(theme => {
+        const q = themeQuestions[theme];
+        return \`
+          <div class="question-group">
+            <label class="question-label">
+              <span class="theme-icon">\${q.icon}</span>
+              \${q.title} : \${q.question}
+            </label>
+            <textarea 
+              name="question_\${theme}" 
+              required 
+              placeholder="Partagez votre expérience..."
+            ></textarea>
+          </div>
+        \`;
+      }).join('');
+
+      step1.classList.add('hidden');
+      step2.classList.remove('hidden');
+    });
+
+    // Retour à l'étape 1
+    prevBtn.addEventListener('click', () => {
+      step2.classList.add('hidden');
+      step1.classList.remove('hidden');
+    });
+
+    // Soumettre le questionnaire
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const selectedThemes = Array.from(document.querySelectorAll('input[name="themes"]:checked'))
+        .map(cb => cb.value);
+
+      const responses = {};
+      selectedThemes.forEach(theme => {
+        const textarea = document.querySelector(\`textarea[name="question_\${theme}"]\`);
+        responses[theme] = textarea.value;
+      });
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Enregistrement...';
+
+      try {
+        const response = await axios.post('/api/questionnaire', {
+          inscription_id: inscriptionId,
+          themes: selectedThemes,
+          responses: responses
+        });
+
+        if (response.data.success) {
+          // Redirection vers page RDV
+          window.location.href = '/rdv/' + inscriptionId;
+        }
+      } catch (error) {
+        message.className = 'message error';
+        message.style.display = 'block';
+        message.textContent = '❌ ' + (error.response?.data?.error || 'Erreur lors de l\'enregistrement');
+        
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Valider mon questionnaire';
+      }
+    });
+  </script>
+</body>
+</html>`);
+
+  } catch (error) {
+    console.error('Erreur questionnaire:', error);
+    return c.html('<h1>Erreur lors du chargement du questionnaire</h1>');
+  }
+});
 
 // =============================================
 // AUTH PAGES
