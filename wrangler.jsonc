@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "webapp",
+  "name": "meorly",
   "compatibility_date": "2025-12-28",
   "pages_build_output_dir": "./dist",
   "compatibility_flags": [
@@ -9,14 +9,14 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "webapp-production",
+      "database_name": "meorly-production",
       "database_id": "local-dev-database"
     }
   ],
   // Variables d'environnement (définies dans .dev.vars pour le dev local)
   // Pour la production, utiliser: wrangler pages secret put RESEND_API_KEY
   "vars": {
-    "FROM_EMAIL": "noreply@academie-lumiere.fr",
-    "ADMIN_EMAIL": "admin@academie-lumiere.fr"
+    "FROM_EMAIL": "noreply@meorly.com",
+    "ADMIN_EMAIL": "admin@meorly.com"
   }
 }
