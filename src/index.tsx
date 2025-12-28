@@ -777,6 +777,67 @@ app.post('/api/auth/logout', (c) => {
 // INSCRIPTION ROUTES
 // =============================================
 
+// API Inscription Step 1 - Vérification et création inscription simple
+app.post('/api/inscription-step1', async (c) => {
+  const { env } = c;
+  try {
+    const { prenom, nom, email, tel } = await c.req.json();
+
+    // Validation
+    if (!prenom || !nom || !email || !tel) {
+      return c.json({ 
+        success: false, 
+        error: 'Tous les champs sont requis' 
+      }, 400);
+    }
+
+    // Vérification blacklist
+    const blacklistCheck = await env.DB.prepare(`
+      SELECT id, raison FROM blacklist 
+      WHERE email = ? OR tel = ?
+    `).bind(email, tel).first();
+
+    if (blacklistCheck) {
+      console.log(`Inscription bloquée: ${email} - Raison: ${blacklistCheck.raison}`);
+      return c.json({ 
+        success: false, 
+        error: 'Cette inscription ne peut pas être effectuée.' 
+      }, 403);
+    }
+
+    // Vérification email existant
+    const existing = await env.DB.prepare(`
+      SELECT id FROM inscriptions WHERE email = ?
+    `).bind(email).first();
+
+    if (existing) {
+      return c.json({ 
+        success: false, 
+        error: 'Cet email est déjà inscrit' 
+      }, 409);
+    }
+
+    // Création inscription
+    const result = await env.DB.prepare(`
+      INSERT INTO inscriptions (prenom, nom, email, tel, status)
+      VALUES (?, ?, ?, ?, 'pending_appointment')
+    `).bind(prenom, nom, email, tel).run();
+
+    return c.json({
+      success: true,
+      inscription_id: result.meta.last_row_id,
+      message: 'Inscription enregistrée ! Passons au questionnaire...'
+    });
+
+  } catch (error) {
+    console.error('Erreur inscription step1:', error);
+    return c.json({ 
+      success: false, 
+      error: 'Une erreur est survenue lors de l\'inscription' 
+    }, 500);
+  }
+});
+
 // API Inscription - Créer une demande de rendez-vous
 app.post('/api/inscription', async (c) => {
   const { env } = c;
@@ -1050,6 +1111,209 @@ app.get('/admin', async (c) => {
     console.error('Erreur admin:', error);
     return c.html('<h1>Erreur lors du chargement des données</h1>')
   }
+})
+
+// =============================================
+// INSCRIPTION PAGE
+// =============================================
+
+// Route: Page d'inscription simplifiée
+app.get('/inscription', (c) => {
+  return c.html(`<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Inscription - Académie de la Lumière</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #0f0f1e 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .container {
+      background: white;
+      border-radius: 16px;
+      padding: 48px;
+      max-width: 600px;
+      width: 100%;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    h1 {
+      font-size: 32px;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin-bottom: 12px;
+      text-align: center;
+    }
+    .subtitle {
+      text-align: center;
+      color: #666;
+      margin-bottom: 40px;
+      font-size: 16px;
+    }
+    .form-group {
+      margin-bottom: 24px;
+    }
+    label {
+      display: block;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+    input {
+      width: 100%;
+      padding: 14px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 16px;
+      font-family: inherit;
+      transition: border-color 0.3s;
+    }
+    input:focus {
+      outline: none;
+      border-color: #4a90e2;
+    }
+    .required { color: #e74c3c; }
+    .btn {
+      width: 100%;
+      padding: 16px;
+      background: #4a90e2;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+    .btn:hover { background: #357abd; }
+    .btn:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .message {
+      padding: 16px;
+      border-radius: 8px;
+      margin-bottom: 24px;
+      display: none;
+    }
+    .message.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+    .message.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+    .back-link {
+      text-align: center;
+      margin-top: 24px;
+    }
+    .back-link a {
+      color: #4a90e2;
+      text-decoration: none;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>✨ Inscription gratuite</h1>
+    <p class="subtitle">Commencez votre parcours spirituel personnalisé</p>
+
+    <div id="message" class="message"></div>
+
+    <form id="inscription-form">
+      <div class="form-group">
+        <label>Prénom <span class="required">*</span></label>
+        <input type="text" name="prenom" required placeholder="Votre prénom">
+      </div>
+
+      <div class="form-group">
+        <label>Nom <span class="required">*</span></label>
+        <input type="text" name="nom" required placeholder="Votre nom">
+      </div>
+
+      <div class="form-group">
+        <label>Email <span class="required">*</span></label>
+        <input type="email" name="email" required placeholder="votre@email.com">
+      </div>
+
+      <div class="form-group">
+        <label>Téléphone <span class="required">*</span></label>
+        <input type="tel" name="tel" required placeholder="+33 6 12 34 56 78">
+      </div>
+
+      <button type="submit" class="btn" id="submit-btn">Continuer →</button>
+    </form>
+
+    <div class="back-link">
+      <a href="/">← Retour à l'accueil</a>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
+  <script>
+    const form = document.getElementById('inscription-form');
+    const message = document.getElementById('message');
+    const submitBtn = document.getElementById('submit-btn');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const formData = new FormData(form);
+      const data = {
+        prenom: formData.get('prenom'),
+        nom: formData.get('nom'),
+        email: formData.get('email'),
+        tel: formData.get('tel')
+      };
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Vérification...';
+
+      try {
+        const response = await axios.post('/api/inscription-step1', data);
+        
+        if (response.data.success) {
+          message.className = 'message success';
+          message.style.display = 'block';
+          message.textContent = '✅ ' + response.data.message;
+          
+          // Redirection vers questionnaire
+          setTimeout(() => {
+            window.location.href = '/questionnaire/' + response.data.inscription_id;
+          }, 1500);
+        }
+      } catch (error) {
+        message.className = 'message error';
+        message.style.display = 'block';
+        
+        if (error.response?.status === 403) {
+          message.textContent = '❌ Cette inscription ne peut pas être effectuée.';
+        } else if (error.response?.status === 409) {
+          message.textContent = '❌ Cet email est déjà inscrit.';
+        } else {
+          message.textContent = '❌ ' + (error.response?.data?.error || 'Erreur lors de l\\'inscription');
+        }
+        
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Continuer →';
+      }
+    });
+  </script>
+</body>
+</html>`)
 })
 
 // =============================================
@@ -2402,7 +2666,6 @@ app.get('/', (c) => {
         </div>
 
         <nav aria-label="Navigation">
-          <a href="#verite">La vérité</a>
           <a href="#approche">Approche</a>
           <a href="#parcours">Parcours</a>
           <a href="#tarifs">Tarifs</a>
@@ -2419,8 +2682,8 @@ app.get('/', (c) => {
     <!-- HERO -->
     <section id="top" style="border-bottom:none; padding-top: 34px;">
       <div class="wrap">
-        <div class="kicker">Direction épurée • contenu-first</div>
-        <h1>Une pratique ancienne. Un cadre clair. Un guide humain.</h1>
+        <div class="kicker">Un guide pour vous</div>
+        <h1>Une pratique ancienne. Un cadre clair. Un guide pour vous.</h1>
         <p class="lead">
           Inscription gratuite. Premier rendez‑vous offert. Pas d'effets. Pas de promesses.
           Juste l'essentiel : écrire votre manifeste, être écouté, recevoir une pratique structurée, et avancer.
@@ -2429,23 +2692,11 @@ app.get('/', (c) => {
           <a class="btn btn-primary" href="#inscription">S'inscrire gratuitement</a>
           <a class="btn" href="#parcours">Voir le parcours</a>
         </div>
-        <p class="hint" style="margin-top:14px;">
-          <span class="mono">Jérusalem</span> · Contact · Mentions légales
-        </p>
+        <!-- Navigation retirée -->
       </div>
     </section>
 
-    <!-- Section 1 — La vérité -->
-    <section id="verite">
-      <div class="wrap">
-        <h2>La vérité</h2>
-        <p>
-          Le Créateur n'intervient pas directement dans Sa création.
-          Il agit à travers Ses messagers — des guides de lumière que la tradition appelle <strong>anges</strong>.
-          Chacun de nous est lié à un protecteur. La plupart l'ont oublié.
-        </p>
-      </div>
-    </section>
+    <!-- Section La vérité retirée -->
 
     <!-- Section 2 — Notre approche -->
     <section id="approche">
