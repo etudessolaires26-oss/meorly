@@ -14,6 +14,508 @@ app.use('/api/*', cors())
 // Serve static files
 app.use('/static/*', serveStatic({ root: './' }))
 
+// =============================================
+// HELPERS - Attribution Logique
+// =============================================
+
+/**
+ * Analyse un texte et extrait les mots-clés pertinents pour l'attribution Petek
+ */
+function analyzeManifeste(text: string): string[] {
+  const keywords: string[] = [];
+  const textLower = text.toLowerCase();
+  
+  // Mapping des thèmes vers les mots-clés
+  const keywordMap: Record<string, string[]> = {
+    'paix': ['paix', 'calme', 'anxiété', 'stress', 'angoisse', 'panique', 'sommeil', 'inquiétude'],
+    'amour': ['amour', 'relation', 'couple', 'mariage', 'séparation', 'famille', 'conflit', 'harmonie'],
+    'reussite': ['réussite', 'travail', 'argent', 'financier', 'carrière', 'projet', 'objectif', 'abondance'],
+    'sante': ['santé', 'maladie', 'fatigue', 'énergie', 'corps', 'bien-être', 'équilibre', 'douleur'],
+    'protection': ['protection', 'danger', 'peur', 'sécurité', 'voyage', 'menace', 'stabilité'],
+    'sagesse': ['sagesse', 'décision', 'clarté', 'orientation', 'choix', 'direction', 'sens', 'vérité']
+  };
+  
+  // Détecter les mots-clés présents
+  for (const [theme, words] of Object.entries(keywordMap)) {
+    for (const word of words) {
+      if (textLower.includes(word)) {
+        if (!keywords.includes(theme)) {
+          keywords.push(theme);
+        }
+      }
+    }
+  }
+  
+  // Si aucun mot-clé détecté, retourner 'paix' par défaut
+  if (keywords.length === 0) {
+    keywords.push('paix');
+  }
+  
+  return keywords;
+}
+
+/**
+ * Attribue un Petek basé sur le manifeste et les mots-clés
+ */
+async function assignPetekToUser(db: D1Database, inscription_id: number, keywords: string[]): Promise<any> {
+  // Chercher un Petek correspondant aux mots-clés
+  let petek = null;
+  
+  for (const keyword of keywords) {
+    const result = await db.prepare(`
+      SELECT * FROM petek_templates 
+      WHERE theme LIKE ? 
+      AND is_active = 1 
+      ORDER BY RANDOM() 
+      LIMIT 1
+    `).bind(`%${keyword}%`).first();
+    
+    if (result) {
+      petek = result;
+      break;
+    }
+  }
+  
+  // Si aucun Petek trouvé, prendre un Petek par défaut
+  if (!petek) {
+    petek = await db.prepare(`
+      SELECT * FROM petek_templates 
+      WHERE is_active = 1 
+      ORDER BY RANDOM() 
+      LIMIT 1
+    `).first();
+  }
+  
+  if (!petek) {
+    throw new Error('Aucun Petek disponible');
+  }
+  
+  // Créer une attribution Petek pour l'utilisateur
+  const attribution = await db.prepare(`
+    INSERT INTO user_peteks (inscription_id, petek_template_id, status)
+    VALUES (?, ?, 'active')
+  `).bind(inscription_id, petek.id).run();
+  
+  return {
+    ...petek,
+    attribution_id: attribution.meta.last_row_id
+  };
+}
+
+/**
+ * Attribue des Psaumes basés sur le manifeste
+ */
+async function assignPsalmsToUser(db: D1Database, inscription_id: number, keywords: string[]): Promise<any[]> {
+  const psalms: any[] = [];
+  
+  // Chercher des psaumes correspondants
+  for (const keyword of keywords.slice(0, 3)) { // Limiter à 3 psaumes
+    const result = await db.prepare(`
+      SELECT * FROM psalms 
+      WHERE tags LIKE ? 
+      AND is_active = 1 
+      ORDER BY RANDOM() 
+      LIMIT 1
+    `).bind(`%${keyword}%`).first();
+    
+    if (result && !psalms.find(p => p.id === result.id)) {
+      psalms.push(result);
+      
+      // Créer une attribution
+      await db.prepare(`
+        INSERT INTO user_psalms (inscription_id, psalm_id, status)
+        VALUES (?, ?, 'active')
+      `).bind(inscription_id, result.id).run();
+    }
+  }
+  
+  // Si aucun psaume trouvé, en attribuer un par défaut
+  if (psalms.length === 0) {
+    const defaultPsalm = await db.prepare(`
+      SELECT * FROM psalms 
+      WHERE is_active = 1 
+      ORDER BY RANDOM() 
+      LIMIT 1
+    `).first();
+    
+    if (defaultPsalm) {
+      psalms.push(defaultPsalm);
+      await db.prepare(`
+        INSERT INTO user_psalms (inscription_id, psalm_id, status)
+        VALUES (?, ?, 'active')
+      `).bind(inscription_id, defaultPsalm.id).run();
+    }
+  }
+  
+  return psalms;
+}
+
+/**
+ * Attribue des Anges basés sur le manifeste
+ */
+async function assignAngelsToUser(db: D1Database, inscription_id: number, keywords: string[]): Promise<any[]> {
+  const angels: any[] = [];
+  
+  // Chercher des anges correspondants via les règles
+  for (const keyword of keywords.slice(0, 2)) { // Limiter à 2 anges
+    const rule = await db.prepare(`
+      SELECT ar.*, a.name_fr, a.name_he, a.description_fr, a.tradition_source
+      FROM angel_rules ar
+      JOIN angels a ON ar.angel_slug = a.slug
+      WHERE ar.tags LIKE ?
+      ORDER BY ar.priority ASC, RANDOM()
+      LIMIT 1
+    `).bind(`%${keyword}%`).first();
+    
+    if (rule && !angels.find(a => a.slug === rule.angel_slug)) {
+      angels.push(rule);
+      
+      // Créer une attribution
+      await db.prepare(`
+        INSERT INTO user_angels (inscription_id, angel_slug, assigned_via)
+        VALUES (?, ?, 'auto')
+      `).bind(inscription_id, rule.angel_slug).run();
+    }
+  }
+  
+  // Si aucun ange trouvé, attribuer Metatron par défaut
+  if (angels.length === 0) {
+    const metatron = await db.prepare(`
+      SELECT a.*, ar.description as rule_description
+      FROM angels a
+      LEFT JOIN angel_rules ar ON a.slug = ar.angel_slug
+      WHERE a.slug = 'metatron'
+      LIMIT 1
+    `).first();
+    
+    if (metatron) {
+      angels.push(metatron);
+      await db.prepare(`
+        INSERT INTO user_angels (inscription_id, angel_slug, assigned_via)
+        VALUES (?, 'metatron', 'default')
+      `).bind(inscription_id).run();
+    }
+  }
+  
+  return angels;
+}
+
+// =============================================
+// API ROUTES
+// =============================================
+
+// POST /api/manifeste - Soumettre un manifeste
+app.post('/api/manifeste', async (c) => {
+  const { env } = c;
+  
+  try {
+    const body = await c.req.json();
+    const { inscription_id, theme, theme_autre, content, reponses } = body;
+
+    if (!inscription_id || !theme) {
+      return c.json({ 
+        success: false, 
+        error: 'inscription_id et theme sont requis' 
+      }, 400);
+    }
+
+    // Insérer le manifeste
+    const result = await env.DB.prepare(`
+      INSERT INTO manifestes (inscription_id, theme, theme_autre, content, reponses, status)
+      VALUES (?, ?, ?, ?, ?, 'submitted')
+    `).bind(
+      inscription_id,
+      theme,
+      theme_autre || null,
+      content || null,
+      reponses ? JSON.stringify(reponses) : null
+    ).run();
+
+    return c.json({ 
+      success: true,
+      manifeste_id: result.meta.last_row_id,
+      message: 'Manifeste soumis avec succès'
+    });
+
+  } catch (error) {
+    console.error('Erreur manifeste:', error);
+    return c.json({ 
+      success: false, 
+      error: 'Erreur lors de la soumission du manifeste' 
+    }, 500);
+  }
+});
+
+// POST /api/analyze-manifeste - Analyser un manifeste et attribuer Petek/Psaume/Ange
+app.post('/api/analyze-manifeste', async (c) => {
+  const { env } = c;
+  
+  try {
+    const body = await c.req.json();
+    const { manifeste_id } = body;
+
+    if (!manifeste_id) {
+      return c.json({ 
+        success: false, 
+        error: 'manifeste_id requis' 
+      }, 400);
+    }
+
+    // Récupérer le manifeste
+    const manifeste = await env.DB.prepare(`
+      SELECT m.*, i.prenom, i.nom 
+      FROM manifestes m
+      JOIN inscriptions i ON m.inscription_id = i.id
+      WHERE m.id = ?
+    `).bind(manifeste_id).first();
+
+    if (!manifeste) {
+      return c.json({ 
+        success: false, 
+        error: 'Manifeste non trouvé' 
+      }, 404);
+    }
+
+    // Construire le texte complet
+    let fullText = `Thème: ${manifeste.theme}\n`;
+    if (manifeste.theme_autre) {
+      fullText += `Thème personnalisé: ${manifeste.theme_autre}\n`;
+    }
+    if (manifeste.content) {
+      fullText += `Contenu: ${manifeste.content}\n`;
+    }
+    if (manifeste.reponses) {
+      const reponses = JSON.parse(manifeste.reponses as string);
+      for (const r of reponses) {
+        if (r.question && r.reponse) {
+          fullText += `Q: ${r.question}\nR: ${r.reponse}\n`;
+        }
+      }
+    }
+
+    // Analyser et extraire les mots-clés
+    const keywords = analyzeManifeste(fullText);
+
+    // Attribuer Petek, Psaumes et Anges
+    const petek = await assignPetekToUser(env.DB, manifeste.inscription_id as number, keywords);
+    const psalms = await assignPsalmsToUser(env.DB, manifeste.inscription_id as number, keywords);
+    const angels = await assignAngelsToUser(env.DB, manifeste.inscription_id as number, keywords);
+
+    // Mettre à jour le statut du manifeste
+    await env.DB.prepare(`
+      UPDATE manifestes 
+      SET status = 'analyzed', updated_at = CURRENT_TIMESTAMP 
+      WHERE id = ?
+    `).bind(manifeste_id).run();
+
+    return c.json({ 
+      success: true,
+      keywords,
+      petek,
+      psalms,
+      angels,
+      message: 'Manifeste analysé et attributions créées avec succès'
+    });
+
+  } catch (error) {
+    console.error('Erreur analyse manifeste:', error);
+    return c.json({ 
+      success: false, 
+      error: 'Erreur lors de l\'analyse du manifeste' 
+    }, 500);
+  }
+});
+
+// GET /api/user/:inscription_id/petek - Récupérer le Petek de l'utilisateur
+app.get('/api/user/:inscription_id/petek', async (c) => {
+  const { env } = c;
+  const inscription_id = c.req.param('inscription_id');
+  
+  try {
+    const result = await env.DB.prepare(`
+      SELECT 
+        up.*,
+        pt.code, pt.theme, pt.theme_label,
+        pt.intent_fr, pt.intent_he, pt.intent_translit,
+        pt.reading_fr, pt.reading_he, pt.reading_translit,
+        pt.practice, pt.guide_comment_fr,
+        pt.duration_recommended, pt.cycle_days
+      FROM user_peteks up
+      JOIN petek_templates pt ON up.petek_template_id = pt.id
+      WHERE up.inscription_id = ? AND up.status = 'active'
+      ORDER BY up.assigned_at DESC
+      LIMIT 1
+    `).bind(inscription_id).first();
+
+    if (!result) {
+      return c.json({ 
+        success: false, 
+        error: 'Aucun Petek actif trouvé pour cet utilisateur' 
+      }, 404);
+    }
+
+    // Parser le JSONB practice si présent
+    const petek = {
+      ...result,
+      practice: result.practice ? JSON.parse(result.practice as string) : {}
+    };
+
+    return c.json({ 
+      success: true,
+      petek
+    });
+
+  } catch (error) {
+    console.error('Erreur récupération Petek:', error);
+    return c.json({ 
+      success: false, 
+      error: 'Erreur lors de la récupération du Petek' 
+    }, 500);
+  }
+});
+
+// GET /api/user/:inscription_id/psalms - Récupérer les Psaumes de l'utilisateur
+app.get('/api/user/:inscription_id/psalms', async (c) => {
+  const { env } = c;
+  const inscription_id = c.req.param('inscription_id');
+  
+  try {
+    const { results } = await env.DB.prepare(`
+      SELECT 
+        up.*,
+        p.number, p.title_fr, p.title_he,
+        p.verse_fr, p.verse_he, p.verse_translit,
+        p.theme, p.tags, p.tradition_note
+      FROM user_psalms up
+      JOIN psalms p ON up.psalm_id = p.id
+      WHERE up.inscription_id = ? AND up.status = 'active'
+      ORDER BY up.assigned_at DESC
+    `).bind(inscription_id).all();
+
+    return c.json({ 
+      success: true,
+      count: results.length,
+      psalms: results
+    });
+
+  } catch (error) {
+    console.error('Erreur récupération Psaumes:', error);
+    return c.json({ 
+      success: false, 
+      error: 'Erreur lors de la récupération des Psaumes' 
+    }, 500);
+  }
+});
+
+// GET /api/user/:inscription_id/angels - Récupérer les Anges de l'utilisateur
+app.get('/api/user/:inscription_id/angels', async (c) => {
+  const { env } = c;
+  const inscription_id = c.req.param('inscription_id');
+  
+  try {
+    const { results } = await env.DB.prepare(`
+      SELECT 
+        ua.*,
+        a.name_fr, a.name_he, a.rank_order,
+        a.description_fr, a.tradition_source, a.level, a.tags
+      FROM user_angels ua
+      JOIN angels a ON ua.angel_slug = a.slug
+      WHERE ua.inscription_id = ?
+      ORDER BY a.rank_order ASC
+    `).bind(inscription_id).all();
+
+    return c.json({ 
+      success: true,
+      count: results.length,
+      angels: results
+    });
+
+  } catch (error) {
+    console.error('Erreur récupération Anges:', error);
+    return c.json({ 
+      success: false, 
+      error: 'Erreur lors de la récupération des Anges' 
+    }, 500);
+  }
+});
+
+// GET /api/peteks - Liste tous les Peteks disponibles (pour admin)
+app.get('/api/peteks', async (c) => {
+  const { env } = c;
+  
+  try {
+    const { results } = await env.DB.prepare(`
+      SELECT * FROM petek_templates 
+      WHERE is_active = 1
+      ORDER BY theme, code
+    `).all();
+
+    return c.json({ 
+      success: true,
+      count: results.length,
+      peteks: results
+    });
+
+  } catch (error) {
+    console.error('Erreur liste Peteks:', error);
+    return c.json({ 
+      success: false, 
+      error: 'Erreur lors de la récupération des Peteks' 
+    }, 500);
+  }
+});
+
+// GET /api/psalms - Liste tous les Psaumes disponibles (pour admin)
+app.get('/api/psalms', async (c) => {
+  const { env } = c;
+  
+  try {
+    const { results } = await env.DB.prepare(`
+      SELECT * FROM psalms 
+      WHERE is_active = 1
+      ORDER BY number
+    `).all();
+
+    return c.json({ 
+      success: true,
+      count: results.length,
+      psalms: results
+    });
+
+  } catch (error) {
+    console.error('Erreur liste Psaumes:', error);
+    return c.json({ 
+      success: false, 
+      error: 'Erreur lors de la récupération des Psaumes' 
+    }, 500);
+  }
+});
+
+// GET /api/angels - Liste tous les Anges disponibles (pour admin)
+app.get('/api/angels', async (c) => {
+  const { env } = c;
+  
+  try {
+    const { results } = await env.DB.prepare(`
+      SELECT * FROM angels 
+      ORDER BY rank_order
+    `).all();
+
+    return c.json({ 
+      success: true,
+      count: results.length,
+      angels: results
+    });
+
+  } catch (error) {
+    console.error('Erreur liste Anges:', error);
+    return c.json({ 
+      success: false, 
+      error: 'Erreur lors de la récupération des Anges' 
+    }, 500);
+  }
+});
+
 // API Routes
 app.get('/api/hello', (c) => {
   return c.json({ message: 'Bienvenue à l\'Académie de la Lumière' })
