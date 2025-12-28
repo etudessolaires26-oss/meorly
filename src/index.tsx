@@ -3759,9 +3759,10 @@ app.get('/', (c) => {
           <a href="#tarifs">Tarifs</a>
           <a href="#bienfaits">Bienfaits</a>
           <a href="#limites">Limites</a>
+          <a href="/login">Connexion</a>
         </nav>
 
-        <a class="btn btn-primary" href="#inscription">S'inscrire gratuitement</a>
+        <a class="btn btn-primary" href="/inscription">S'inscrire gratuitement</a>
       </div>
     </div>
   </header>
@@ -3777,7 +3778,7 @@ app.get('/', (c) => {
           Juste l'essentiel : écrire votre manifeste, être écouté, recevoir une pratique structurée, et avancer.
         </p>
         <div class="ctaRow">
-          <a class="btn btn-primary" href="#inscription">S'inscrire gratuitement</a>
+          <a class="btn btn-primary" href="/inscription">S'inscrire gratuitement</a>
           <a class="btn" href="#parcours">Voir le parcours</a>
         </div>
         <!-- Navigation retirée -->
@@ -3908,7 +3909,7 @@ app.get('/', (c) => {
         </p>
 
         <div class="ctaRow" style="margin-top:18px;">
-          <a class="btn btn-primary" href="#inscription">Prêt à commencer ? S'inscrire gratuitement</a>
+          <a class="btn btn-primary" href="/inscription">Prêt à commencer ? S'inscrire gratuitement</a>
         </div>
       </div>
     </section>
@@ -3993,134 +3994,6 @@ app.get('/', (c) => {
       </div>
     </section>
 
-    <!-- INSCRIPTION -->
-    <section id="inscription">
-      <div class="wrap grid2">
-        <div>
-          <h2>Inscription gratuite</h2>
-          <p>Remplissez votre profil et prenez rendez-vous pour un premier entretien gratuit avec un guide.</p>
-
-          <div id="success-message" class="success-message">
-            ✨ Inscription réussie ! Nous vous contacterons bientôt.
-          </div>
-
-          <form id="inscription-form" class="card" aria-label="Formulaire d'inscription">
-            <div style="display:grid; gap:16px; max-width: 520px;">
-              
-              <!-- Informations personnelles -->
-              <div style="border-bottom: 1px solid rgba(255,255,255,.08); padding-bottom: 16px;">
-                <h3 style="margin: 0 0 12px 0; font-size: 16px;">Vos informations</h3>
-                
-                <div style="display:grid; gap:10px;">
-                  <div style="display:grid; gap:6px;">
-                    <label for="prenom" style="font-size:12px; color: var(--muted2);">Prénom *</label>
-                    <input id="prenom" name="prenom" required placeholder="Votre prénom" />
-                  </div>
-                  <div style="display:grid; gap:6px;">
-                    <label for="nom" style="font-size:12px; color: var(--muted2);">Nom *</label>
-                    <input id="nom" name="nom" required placeholder="Votre nom" />
-                  </div>
-                  <div style="display:grid; gap:6px;">
-                    <label for="email" style="font-size:12px; color: var(--muted2);">Email *</label>
-                    <input id="email" type="email" name="email" required placeholder="votre@email.com" />
-                  </div>
-                  <div style="display:grid; gap:6px;">
-                    <label for="tel" style="font-size:12px; color: var(--muted2);">Téléphone *</label>
-                    <input id="tel" name="tel" required placeholder="+33 6 12 34 56 78" />
-                  </div>
-                </div>
-              </div>
-
-              <!-- Questions manifeste -->
-              <div style="border-bottom: 1px solid rgba(255,255,255,.08); padding-bottom: 16px;">
-                <h3 style="margin: 0 0 12px 0; font-size: 16px;">Votre manifeste spirituel</h3>
-                
-                <div style="display:grid; gap:10px;">
-                  <div style="display:grid; gap:6px;">
-                    <label for="theme" style="font-size:12px; color: var(--muted2);">Thème principal *</label>
-                    <select id="theme" name="theme" required>
-                      <option value="">-- Choisissez un thème --</option>
-                      <option value="paix">Paix intérieure</option>
-                      <option value="amour">Amour & Relations</option>
-                      <option value="reussite">Réussite & Abondance</option>
-                      <option value="sante">Santé & Vitalité</option>
-                      <option value="protection">Protection & Sécurité</option>
-                      <option value="sagesse">Sagesse & Clarté</option>
-                      <option value="autre">Autre</option>
-                    </select>
-                  </div>
-
-                  <div id="theme-autre-box" style="display: none;">
-                    <div style="display:grid; gap:6px;">
-                      <label for="theme_autre" style="font-size:12px; color: var(--muted2);">Précisez votre thème</label>
-                      <input id="theme_autre" name="theme_autre" placeholder="Ex: Guérison émotionnelle, pardon..." />
-                    </div>
-                  </div>
-
-                  <div style="display:grid; gap:6px;">
-                    <label for="situation" style="font-size:12px; color: var(--muted2);">Décrivez votre situation actuelle *</label>
-                    <textarea id="situation" name="situation" required placeholder="Parlez-nous de votre situation, vos défis, vos aspirations..." style="min-height: 100px; resize: vertical;"></textarea>
-                  </div>
-
-                  <div style="display:grid; gap:6px;">
-                    <label for="objectifs" style="font-size:12px; color: var(--muted2);">Que souhaitez-vous atteindre ? *</label>
-                    <textarea id="objectifs" name="objectifs" required placeholder="Vos aspirations, ce que vous souhaitez transformer..." style="min-height: 80px; resize: vertical;"></textarea>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Prise de rendez-vous -->
-              <div>
-                <h3 style="margin: 0 0 12px 0; font-size: 16px;">Prise de rendez-vous (premier entretien gratuit)</h3>
-                
-                <div style="display:grid; gap:10px;">
-                  <div style="display:grid; gap:6px;">
-                    <label for="rdv_date_souhaitee" style="font-size:12px; color: var(--muted2);">Date souhaitée *</label>
-                    <input id="rdv_date_souhaitee" name="rdv_date_souhaitee" type="date" required />
-                  </div>
-
-                  <div style="display:grid; gap:6px;">
-                    <label for="rdv_heure_souhaitee" style="font-size:12px; color: var(--muted2);">Créneau horaire souhaité *</label>
-                    <select id="rdv_heure_souhaitee" name="rdv_heure_souhaitee" required>
-                      <option value="">-- Choisissez un créneau --</option>
-                      <option value="matin">Matin (9h-12h)</option>
-                      <option value="apres-midi">Après-midi (14h-17h)</option>
-                      <option value="soir">Soir (18h-20h)</option>
-                    </select>
-                  </div>
-
-                  <div style="display:grid; gap:6px;">
-                    <label for="rdv_notes" style="font-size:12px; color: var(--muted2);">Remarques (optionnel)</label>
-                    <textarea id="rdv_notes" name="rdv_notes" placeholder="Précisions sur vos disponibilités..." style="min-height: 60px; resize: vertical;"></textarea>
-                  </div>
-                </div>
-              </div>
-
-              <button class="btn btn-primary" type="submit" style="justify-self:start;">Envoyer ma demande</button>
-              <div class="hint">Premier entretien gratuit • Sans engagement • Formule choisie avec le guide</div>
-            </div>
-          </form>
-        </div>
-
-        <div class="card">
-          <h3>Adresse</h3>
-          <p style="margin:0; color: var(--muted2);">
-            Western Wall Plaza, Jewish Quarter, Old City,<br>
-            Jerusalem, Israel
-          </p>
-          <div style="height:14px"></div>
-
-          <h3>Application</h3>
-          <p style="margin:0; color: var(--muted2);">
-            Accès à votre Manifeste, votre Petek, votre pratique, et votre chat avec le guide.
-          </p>
-          <div style="height:12px"></div>
-          <a class="btn" href="#" aria-label="iOS">iOS (à venir)</a>
-          <span style="display:inline-block; width:10px;"></span>
-          <a class="btn" href="#" aria-label="Android">Android (à venir)</a>
-        </div>
-      </div>
-    </section>
 
     <footer>
       <div class="wrap">
@@ -4141,84 +4014,6 @@ app.get('/', (c) => {
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
-  <script>
-    // Set current year
-    document.getElementById('y').textContent = new Date().getFullYear();
-
-    // Show/hide theme_autre field
-    document.getElementById('theme').addEventListener('change', (e) => {
-      const themeAutreBox = document.getElementById('theme-autre-box');
-      if (e.target.value === 'autre') {
-        themeAutreBox.style.display = 'block';
-      } else {
-        themeAutreBox.style.display = 'none';
-      }
-    });
-
-    // Handle form submission
-    document.getElementById('inscription-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      
-      const formData = {
-        prenom: document.getElementById('prenom').value,
-        nom: document.getElementById('nom').value,
-        email: document.getElementById('email').value,
-        tel: document.getElementById('tel').value,
-        theme: document.getElementById('theme').value,
-        theme_autre: document.getElementById('theme_autre').value || null,
-        situation: document.getElementById('situation').value,
-        objectifs: document.getElementById('objectifs').value,
-        rdv_date_souhaitee: document.getElementById('rdv_date_souhaitee').value,
-        rdv_heure_souhaitee: document.getElementById('rdv_heure_souhaitee').value,
-        rdv_notes: document.getElementById('rdv_notes').value || null
-      };
-
-      try {
-        const response = await axios.post('/api/inscription', formData);
-        
-        if (response.data.success) {
-          // Show success message
-          const successMsg = document.getElementById('success-message');
-          successMsg.innerHTML = 
-            '<strong>✓ Demande envoyée avec succès !</strong><br>' +
-            '<span style="font-size: 14px; margin-top: 8px; display: block;">' +
-            'Nous vous contacterons rapidement pour confirmer votre rendez-vous gratuit.' +
-            '</span>';
-          successMsg.classList.add('show');
-          
-          // Reset form
-          e.target.reset();
-          
-          // Auto hide message after 10 seconds
-          setTimeout(() => {
-            successMsg.classList.remove('show');
-          }, 10000);
-        }
-      } catch (error) {
-        console.error('Erreur lors de l\'inscription:', error);
-        
-        if (error.response?.status === 409) {
-          alert('Cet email est déjà enregistré. Un guide vous contactera bientôt.');
-        } else {
-          alert(error.response?.data?.error || 'Une erreur est survenue. Veuillez réessayer.');
-        }
-      }
-    });
-
-    // Smooth scroll for anchor links
-    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-      anchor.addEventListener('click', function (e) {
-        e.preventDefault();
-        const target = document.querySelector(this.getAttribute('href'));
-        if (target) {
-          target.scrollIntoView({
-            behavior: 'smooth',
-            block: 'start'
-          });
-        }
-      });
-    });
-  </script>
 </body>
 </html>`)
 })
