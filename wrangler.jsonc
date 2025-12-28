@@ -12,5 +12,11 @@
       "database_name": "webapp-production",
       "database_id": "local-dev-database"
     }
-  ]
+  ],
+  // Variables d'environnement (définies dans .dev.vars pour le dev local)
+  // Pour la production, utiliser: wrangler pages secret put RESEND_API_KEY
+  "vars": {
+    "FROM_EMAIL": "noreply@academie-lumiere.fr",
+    "ADMIN_EMAIL": "admin@academie-lumiere.fr"
+  }
 }

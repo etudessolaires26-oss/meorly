@@ -282,6 +282,52 @@ async function assignAngelsToUser(db: D1Database, inscription_id: number, keywor
   return angels;
 }
 
+// Fonction d'envoi d'email via Resend
+async function sendEmail(
+  env: any,
+  to: string,
+  subject: string,
+  html: string
+): Promise<boolean> {
+  try {
+    const RESEND_API_KEY = env.RESEND_API_KEY;
+    const FROM_EMAIL = env.FROM_EMAIL || 'noreply@academie-lumiere.fr';
+
+    if (!RESEND_API_KEY) {
+      console.error('❌ RESEND_API_KEY non configurée');
+      return false;
+    }
+
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${RESEND_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        from: FROM_EMAIL,
+        to: [to],
+        subject: subject,
+        html: html
+      })
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error('❌ Erreur Resend:', error);
+      return false;
+    }
+
+    const result = await response.json();
+    console.log('✅ Email envoyé:', result.id);
+    return true;
+
+  } catch (error) {
+    console.error('❌ Erreur envoi email:', error);
+    return false;
+  }
+}
+
 // =============================================
 // API ROUTES
 // =============================================
@@ -1140,18 +1186,132 @@ app.post('/api/admin/validate-payment', async (c) => {
       WHERE user_id = ?
     `).bind(inscription_id).run();
 
-    // Attribution automatique Petek/Psaumes/Anges (utiliser la fonction existante)
-    // Pour l'instant, log uniquement
+    // Attribution automatique Petek/Psaumes/Anges
     console.log(`Compte créé pour ${inscription.email} - Mot de passe temporaire: ${tempPassword}`);
-    console.log(`TODO: Attribuer Petek/Psaumes/Anges pour formule ${inscription.formule}`);
+    console.log(`Attribution du parcours pour formule: ${inscription.formule}`);
 
-    // TODO: Envoyer email avec identifiants
+    // Analyser le manifeste pour extraire les thèmes
+    const manifesteText = inscription.content || inscription.theme || 'paix';
+    const keywords = analyzeManifeste(manifesteText);
+    console.log(`Thèmes détectés: ${keywords.join(', ')}`);
+
+    // 1. Attribuer Petek
+    const petek = await assignPetekToUser(env.DB, inscription_id, keywords);
+    console.log(`✅ Petek attribué: ${petek.code} - ${petek.theme}`);
+
+    // 2. Attribuer Psaumes selon la formule
+    let psalmsCount = 1; // Par défaut
+    if (inscription.formule === 'psaumes') {
+      psalmsCount = 3; // 3-5 Psaumes
+    } else if (inscription.formule === 'integral') {
+      psalmsCount = 5; // Psaumes illimités (commencer avec 5)
+    }
+
+    const psalms = await assignPsalmsToUser(env.DB, inscription_id, keywords);
+    console.log(`✅ ${psalms.length} Psaume(s) attribué(s)`);
+
+    // 3. Attribuer Anges (2 anges protecteurs)
+    const angels = await assignAngelsToUser(env.DB, inscription_id, keywords);
+    console.log(`✅ ${angels.length} Ange(s) attribué(s)`);
+
+    // 4. Envoyer email avec identifiants
+    const emailHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <style>
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+          .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
+          .credentials { background: white; padding: 20px; border-left: 4px solid #667eea; margin: 20px 0; border-radius: 5px; }
+          .credentials p { margin: 10px 0; }
+          .credentials strong { color: #667eea; }
+          .button { display: inline-block; background: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; margin: 20px 0; }
+          .footer { text-align: center; color: #666; font-size: 12px; margin-top: 20px; }
+          .attribution { background: #e8f5e9; padding: 15px; border-radius: 5px; margin: 15px 0; }
+          .attribution-item { margin: 8px 0; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>✨ Bienvenue à l'Académie de la Lumière ✨</h1>
+          </div>
+          <div class="content">
+            <h2>Bonjour ${inscription.prenom},</h2>
+            
+            <p>Votre paiement a été validé avec succès ! 🎉</p>
+            
+            <p>Votre compte a été créé et votre parcours spirituel personnalisé est maintenant disponible.</p>
+            
+            <div class="credentials">
+              <h3>🔐 Vos identifiants de connexion</h3>
+              <p><strong>Email :</strong> ${inscription.email}</p>
+              <p><strong>Mot de passe temporaire :</strong> ${tempPassword}</p>
+              <p style="color: #e67e22; font-size: 14px;">⚠️ Veuillez changer ce mot de passe lors de votre première connexion.</p>
+            </div>
+
+            <div class="attribution">
+              <h3>🎁 Votre parcours spirituel personnalisé</h3>
+              <div class="attribution-item">📿 <strong>Petek :</strong> ${petek.code} - ${petek.theme}</div>
+              <div class="attribution-item">📖 <strong>Psaumes :</strong> ${psalms.length} Psaume(s) attribué(s)</div>
+              <div class="attribution-item">👼 <strong>Anges protecteurs :</strong> ${angels.length} Ange(s) attribué(s)</div>
+              <div class="attribution-item">💎 <strong>Formule :</strong> ${inscription.formule === 'essentiel' ? 'Petek Essentiel' : inscription.formule === 'psaumes' ? 'Petek & Psaumes' : 'Parcours Intégral'}</div>
+            </div>
+
+            <center>
+              <a href="https://3000-ijdjdyk7wwphujd5fn2kw-02b9cc79.sandbox.novita.ai/login" class="button">
+                Se connecter maintenant
+              </a>
+            </center>
+
+            <h3>📅 Prochaines étapes</h3>
+            <ol>
+              <li>Connectez-vous avec vos identifiants</li>
+              <li>Changez votre mot de passe temporaire</li>
+              <li>Découvrez votre Petek personnalisé</li>
+              <li>Explorez vos Psaumes et Anges protecteurs</li>
+              <li>Commencez votre parcours spirituel</li>
+            </ol>
+
+            <p>Un guide va vous contacter prochainement pour planifier vos entretiens individuels.</p>
+
+            <div class="footer">
+              <p>© ${new Date().getFullYear()} Académie de la Lumière</p>
+              <p>Cet email a été envoyé automatiquement suite à la validation de votre paiement.</p>
+            </div>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const emailSent = await sendEmail(
+      env,
+      inscription.email,
+      '✨ Bienvenue à l\'Académie de la Lumière - Vos identifiants',
+      emailHtml
+    );
+
+    if (emailSent) {
+      console.log(`✅ Email envoyé à ${inscription.email}`);
+    } else {
+      console.warn(`⚠️ Échec envoi email à ${inscription.email}, mais compte créé`);
+    }
 
     return c.json({ 
       success: true, 
-      message: 'Paiement validé ! Compte créé avec succès.',
+      message: 'Paiement validé ! Compte créé et parcours attribué avec succès.',
       user_id: userId,
-      temp_password: tempPassword
+      temp_password: tempPassword,
+      email_sent: emailSent,
+      attribution: {
+        petek: petek.code,
+        psalms_count: psalms.length,
+        angels_count: angels.length
+      }
     });
 
   } catch (error) {
