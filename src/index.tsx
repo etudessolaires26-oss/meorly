@@ -777,81 +777,44 @@ app.post('/api/auth/logout', (c) => {
 // INSCRIPTION ROUTES
 // =============================================
 
-// API Inscription - Créer un compte utilisateur complet
+// API Inscription - Créer une demande de rendez-vous
 app.post('/api/inscription', async (c) => {
   const { env } = c;
   
   try {
     const body = await c.req.json();
-    const { prenom, nom, email, tel, password, formule, theme, theme_autre, situation, objectifs } = body;
+    const { prenom, nom, email, tel, theme, theme_autre, situation, objectifs, rdv_date_souhaitee, rdv_heure_souhaitee, rdv_notes } = body;
 
     // Validation
-    if (!prenom || !nom || !email || !tel || !password || !formule || !theme || !situation || !objectifs) {
+    if (!prenom || !nom || !email || !tel || !theme || !situation || !objectifs || !rdv_date_souhaitee || !rdv_heure_souhaitee) {
       return c.json({ 
         success: false, 
         error: 'Tous les champs obligatoires (*) doivent être remplis' 
       }, 400);
     }
 
-    // Validation mot de passe
-    if (password.length < 8) {
-      return c.json({ 
-        success: false, 
-        error: 'Le mot de passe doit contenir au moins 8 caractères' 
-      }, 400);
-    }
-
-    // Vérifier si l'email existe déjà dans users
-    const existingUser = await env.DB.prepare(
-      'SELECT id FROM users WHERE email = ?'
+    // Vérifier si l'email existe déjà dans inscriptions
+    const existingInscription = await env.DB.prepare(
+      'SELECT id FROM inscriptions WHERE email = ?'
     ).bind(email).first();
 
-    if (existingUser) {
+    if (existingInscription) {
       return c.json({ 
         success: false, 
-        error: 'Cet email est déjà utilisé' 
+        error: 'Cet email est déjà enregistré. Un guide vous contactera bientôt.' 
       }, 409);
     }
 
-    // Hash du mot de passe
-    const password_hash = bcrypt.hashSync(password, 10);
-
-    // Déterminer le prix de la formule
-    const formuleMap: Record<string, number> = {
-      'essentiel': 175,
-      'psaumes': 495,
-      'integral': 1500
-    };
-    const formule_prix = formuleMap[formule] || 0;
-
-    // 1. Créer l'utilisateur
-    const userResult = await env.DB.prepare(`
-      INSERT INTO users (email, password_hash, role, status)
-      VALUES (?, ?, 'client', 'pending_payment')
-    `).bind(email, password_hash).run();
-
-    const user_id = userResult.meta.last_row_id;
-
-    // 2. Créer le profil utilisateur
-    await env.DB.prepare(`
-      INSERT INTO user_profiles (
-        user_id, prenom, nom, tel, 
-        formule, formule_prix, 
-        payment_status
-      )
-      VALUES (?, ?, ?, ?, ?, ?, 'pending')
-    `).bind(user_id, prenom, nom, tel, formule, formule_prix).run();
-
-    // 3. Créer l'inscription (ancienne table, pour compatibilité)
+    // 1. Créer l'inscription avec status pending_appointment
     const inscriptionResult = await env.DB.prepare(`
-      INSERT INTO inscriptions (prenom, nom, email, tel, objectif, user_id)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).bind(prenom, nom, email, tel, theme, user_id).run();
+      INSERT INTO inscriptions (prenom, nom, email, tel, objectif, status)
+      VALUES (?, ?, ?, ?, ?, 'pending_appointment')
+    `).bind(prenom, nom, email, tel, theme).run();
 
     const inscription_id = inscriptionResult.meta.last_row_id;
 
-    // 4. Créer le manifeste automatiquement
-    const manifesteResult = await env.DB.prepare(`
+    // 2. Créer le manifeste
+    await env.DB.prepare(`
       INSERT INTO manifestes (
         inscription_id, theme, theme_autre, content, reponses, status
       )
@@ -863,42 +826,22 @@ app.post('/api/inscription', async (c) => {
       situation,
       JSON.stringify([
         { question: 'Situation actuelle', reponse: situation },
-        { question: 'Objectifs', reponse: objectifs }
+        { question: 'Objectifs', reponse: objectifs },
+        { question: 'RDV souhaité', reponse: `${rdv_date_souhaitee} - ${rdv_heure_souhaitee}${rdv_notes ? ' - ' + rdv_notes : ''}` }
       ])
     ).run();
 
-    const manifeste_id = manifesteResult.meta.last_row_id;
-
-    // 5. Analyser le manifeste et attribuer Petek/Psaumes/Anges automatiquement
-    const fullText = `${theme} ${theme_autre || ''} ${situation} ${objectifs}`;
-    const keywords = analyzeManifeste(fullText);
-    
-    // Attribution Petek
-    await assignPetekToUser(env.DB, inscription_id, keywords);
-    
-    // Attribution Psaumes
-    await assignPsalmsToUser(env.DB, inscription_id, keywords);
-    
-    // Attribution Anges
-    await assignAngelsToUser(env.DB, inscription_id, keywords);
-
-    // Mettre à jour le statut du manifeste
-    await env.DB.prepare(`
-      UPDATE manifestes SET status = 'analyzed' WHERE id = ?
-    `).bind(manifeste_id).run();
-
     return c.json({ 
       success: true,
-      user_id,
       inscription_id,
-      message: 'Compte créé avec succès ! Votre parcours spirituel est prêt. Nous vous contacterons pour le premier entretien.'
+      message: 'Demande enregistrée avec succès ! Nous vous contacterons pour confirmer votre rendez-vous gratuit.'
     });
 
   } catch (error) {
     console.error('Erreur lors de l\'inscription:', error);
     return c.json({ 
       success: false, 
-      error: 'Une erreur est survenue lors de la création du compte' 
+      error: 'Une erreur est survenue lors de l\'enregistrement de votre demande' 
     }, 500);
   }
 })
@@ -2716,7 +2659,7 @@ app.get('/', (c) => {
       <div class="wrap grid2">
         <div>
           <h2>Inscription gratuite</h2>
-          <p>Créez votre compte et choisissez votre formule. Premier entretien gratuit, paiement après validation mutuelle.</p>
+          <p>Remplissez votre profil et prenez rendez-vous pour un premier entretien gratuit avec un guide.</p>
 
           <div id="success-message" class="success-message">
             ✨ Inscription réussie ! Nous vous contacterons bientôt.
@@ -2746,47 +2689,11 @@ app.get('/', (c) => {
                     <label for="tel" style="font-size:12px; color: var(--muted2);">Téléphone *</label>
                     <input id="tel" name="tel" required placeholder="+33 6 12 34 56 78" />
                   </div>
-                  <div style="display:grid; gap:6px;">
-                    <label for="password" style="font-size:12px; color: var(--muted2);">Mot de passe *</label>
-                    <input id="password" type="password" name="password" required placeholder="••••••••" minlength="8" />
-                    <span style="font-size:11px; color: var(--muted2);">Minimum 8 caractères</span>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Choix de formule -->
-              <div style="border-bottom: 1px solid rgba(255,255,255,.08); padding-bottom: 16px;">
-                <h3 style="margin: 0 0 12px 0; font-size: 16px;">Formule souhaitée *</h3>
-                
-                <div style="display:grid; gap:10px;">
-                  <label style="display: flex; gap: 10px; padding: 12px; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; cursor: pointer; transition: all 0.2s;">
-                    <input type="radio" name="formule" value="essentiel" required style="width: auto; margin: 0;" />
-                    <div style="flex: 1;">
-                      <strong style="display: block; margin-bottom: 4px;">Petek Essentiel - 175€</strong>
-                      <span style="font-size: 12px; color: var(--muted2);">1 entretien, 1 Petek, accès illimité</span>
-                    </div>
-                  </label>
-                  
-                  <label style="display: flex; gap: 10px; padding: 12px; border: 2px solid rgba(179,136,235,.4); border-radius: 8px; cursor: pointer; background: rgba(179,136,235,.05); transition: all 0.2s;">
-                    <input type="radio" name="formule" value="psaumes" style="width: auto; margin: 0;" />
-                    <div style="flex: 1;">
-                      <strong style="display: block; margin-bottom: 4px;">Petek & Psaumes - 495€ <span style="background: var(--accent); color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px; margin-left: 6px;">Recommandé</span></strong>
-                      <span style="font-size: 12px; color: var(--muted2);">3 entretiens, Peteks & Psaumes personnalisés, 1 Ange</span>
-                    </div>
-                  </label>
-                  
-                  <label style="display: flex; gap: 10px; padding: 12px; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; cursor: pointer; transition: all 0.2s;">
-                    <input type="radio" name="formule" value="integral" style="width: auto; margin: 0;" />
-                    <div style="flex: 1;">
-                      <strong style="display: block; margin-bottom: 4px;">Parcours Intégral - 1500€</strong>
-                      <span style="font-size: 12px; color: var(--muted2);">6 mois d'accompagnement illimité, tout inclus</span>
-                    </div>
-                  </label>
                 </div>
               </div>
 
               <!-- Questions manifeste -->
-              <div>
+              <div style="border-bottom: 1px solid rgba(255,255,255,.08); padding-bottom: 16px;">
                 <h3 style="margin: 0 0 12px 0; font-size: 16px;">Votre manifeste spirituel</h3>
                 
                 <div style="display:grid; gap:10px;">
@@ -2823,8 +2730,35 @@ app.get('/', (c) => {
                 </div>
               </div>
 
-              <button class="btn btn-primary" type="submit" style="justify-self:start;">Créer mon compte</button>
-              <div class="hint">Premier entretien gratuit • Paiement après validation mutuelle • Sans engagement</div>
+              <!-- Prise de rendez-vous -->
+              <div>
+                <h3 style="margin: 0 0 12px 0; font-size: 16px;">Prise de rendez-vous (premier entretien gratuit)</h3>
+                
+                <div style="display:grid; gap:10px;">
+                  <div style="display:grid; gap:6px;">
+                    <label for="rdv_date_souhaitee" style="font-size:12px; color: var(--muted2);">Date souhaitée *</label>
+                    <input id="rdv_date_souhaitee" name="rdv_date_souhaitee" type="date" required />
+                  </div>
+
+                  <div style="display:grid; gap:6px;">
+                    <label for="rdv_heure_souhaitee" style="font-size:12px; color: var(--muted2);">Créneau horaire souhaité *</label>
+                    <select id="rdv_heure_souhaitee" name="rdv_heure_souhaitee" required>
+                      <option value="">-- Choisissez un créneau --</option>
+                      <option value="matin">Matin (9h-12h)</option>
+                      <option value="apres-midi">Après-midi (14h-17h)</option>
+                      <option value="soir">Soir (18h-20h)</option>
+                    </select>
+                  </div>
+
+                  <div style="display:grid; gap:6px;">
+                    <label for="rdv_notes" style="font-size:12px; color: var(--muted2);">Remarques (optionnel)</label>
+                    <textarea id="rdv_notes" name="rdv_notes" placeholder="Précisions sur vos disponibilités..." style="min-height: 60px; resize: vertical;"></textarea>
+                  </div>
+                </div>
+              </div>
+
+              <button class="btn btn-primary" type="submit" style="justify-self:start;">Envoyer ma demande</button>
+              <div class="hint">Premier entretien gratuit • Sans engagement • Formule choisie avec le guide</div>
             </div>
           </form>
         </div>
@@ -2891,45 +2825,41 @@ app.get('/', (c) => {
         nom: document.getElementById('nom').value,
         email: document.getElementById('email').value,
         tel: document.getElementById('tel').value,
-        password: document.getElementById('password').value,
-        formule: document.querySelector('input[name="formule"]:checked')?.value,
         theme: document.getElementById('theme').value,
         theme_autre: document.getElementById('theme_autre').value || null,
         situation: document.getElementById('situation').value,
-        objectifs: document.getElementById('objectifs').value
+        objectifs: document.getElementById('objectifs').value,
+        rdv_date_souhaitee: document.getElementById('rdv_date_souhaitee').value,
+        rdv_heure_souhaitee: document.getElementById('rdv_heure_souhaitee').value,
+        rdv_notes: document.getElementById('rdv_notes').value || null
       };
 
       try {
         const response = await axios.post('/api/inscription', formData);
         
         if (response.data.success) {
-          const userId = response.data.user_id;
-          
           // Show success message
           const successMsg = document.getElementById('success-message');
           successMsg.innerHTML = 
-            '<strong>✓ Compte créé avec succès !</strong><br>' +
+            '<strong>✓ Demande envoyée avec succès !</strong><br>' +
             '<span style="font-size: 14px; margin-top: 8px; display: block;">' +
-            'Nous vous contacterons pour planifier votre premier entretien gratuit. ' +
-            '<a href="/login" style="color: #b388eb; text-decoration: underline; font-weight: 500;">' +
-            'Se connecter →' +
-            '</a>' +
+            'Nous vous contacterons rapidement pour confirmer votre rendez-vous gratuit.' +
             '</span>';
           successMsg.classList.add('show');
           
           // Reset form
           e.target.reset();
           
-          // Auto redirect after 5 seconds
+          // Auto hide message after 10 seconds
           setTimeout(() => {
-            window.location.href = '/login';
-          }, 5000);
+            successMsg.classList.remove('show');
+          }, 10000);
         }
       } catch (error) {
         console.error('Erreur lors de l\'inscription:', error);
         
         if (error.response?.status === 409) {
-          alert('Cet email est déjà utilisé. Veuillez utiliser un autre email ou vous connecter.');
+          alert('Cet email est déjà enregistré. Un guide vous contactera bientôt.');
         } else {
           alert(error.response?.data?.error || 'Une erreur est survenue. Veuillez réessayer.');
         }
