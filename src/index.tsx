@@ -2178,23 +2178,29 @@ app.get('/admin', async (c) => {
               <td>
                 <div class="actions">
                   ${r.status === 'pending_appointment' ? `
-                    <button class="btn btn-small btn-success" onclick="markContacted(${r.id})">
-                      Contacter
-                    </button>
+                    ${r.theme && r.date_rdv ? `
+                      <button class="btn btn-small btn-success" onclick="markContacted(${r.id})">
+                        ✅ Contacter
+                      </button>
+                    ` : `
+                      <span style="font-size: 11px; color: #ff9800;">
+                        ⏳ ${!r.theme ? 'Questionnaire manquant' : ''} ${!r.date_rdv ? 'RDV manquant' : ''}
+                      </span>
+                    `}
                   ` : ''}
                   ${r.status === 'contacted' ? `
                     <button class="btn btn-small btn-warning" onclick="openPaymentModal(${r.id}, '${r.prenom}', '${r.nom}')">
-                      Saisir paiement
+                      💳 Saisir paiement
                     </button>
                   ` : ''}
                   ${r.status === 'payment_pending' ? `
                     <button class="btn btn-small btn-success" onclick="validatePayment(${r.id})">
-                      Valider paiement
+                      ✅ Valider paiement
                     </button>
                   ` : ''}
                   ${r.status === 'completed' ? `
                     <a href="/mon-parcours/${r.id}" class="btn btn-small" target="_blank">
-                      Voir parcours
+                      👁️ Voir parcours
                     </a>
                   ` : ''}
                 </div>
