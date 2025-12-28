@@ -1024,6 +1024,142 @@ app.post('/api/rdv', async (c) => {
   }
 });
 
+// =============================================
+// ADMIN API
+// =============================================
+
+// API Admin: Marquer comme contacté
+app.post('/api/admin/mark-contacted', async (c) => {
+  const { env } = c;
+  try {
+    const { inscription_id } = await c.req.json();
+
+    if (!inscription_id) {
+      return c.json({ success: false, error: 'ID inscription requis' }, 400);
+    }
+
+    // Update status
+    await env.DB.prepare(`
+      UPDATE inscriptions 
+      SET status = 'contacted'
+      WHERE id = ?
+    `).bind(inscription_id).run();
+
+    return c.json({ success: true, message: 'Status mis à jour' });
+
+  } catch (error) {
+    console.error('Erreur mark-contacted:', error);
+    return c.json({ success: false, error: 'Erreur serveur' }, 500);
+  }
+});
+
+// API Admin: Enregistrer le paiement (formule + montant)
+app.post('/api/admin/record-payment', async (c) => {
+  const { env } = c;
+  try {
+    const { inscription_id, formule, amount, payment_link } = await c.req.json();
+
+    if (!inscription_id || !formule || !amount) {
+      return c.json({ success: false, error: 'Données incomplètes' }, 400);
+    }
+
+    // Créer user_profile avec la formule
+    await env.DB.prepare(`
+      INSERT OR REPLACE INTO user_profiles (user_id, formule, formule_prix, payment_status)
+      VALUES (?, ?, ?, 'pending')
+    `).bind(inscription_id, formule, amount).run();
+
+    // Update status inscription
+    await env.DB.prepare(`
+      UPDATE inscriptions 
+      SET status = 'payment_pending'
+      WHERE id = ?
+    `).bind(inscription_id).run();
+
+    // Log payment link si fourni
+    if (payment_link) {
+      console.log(`Lien de paiement pour inscription ${inscription_id}: ${payment_link}`);
+    }
+
+    return c.json({ 
+      success: true, 
+      message: 'Paiement enregistré. En attente du paiement client.' 
+    });
+
+  } catch (error) {
+    console.error('Erreur record-payment:', error);
+    return c.json({ success: false, error: 'Erreur serveur' }, 500);
+  }
+});
+
+// API Admin: Valider paiement et créer compte
+app.post('/api/admin/validate-payment', async (c) => {
+  const { env } = c;
+  try {
+    const { inscription_id } = await c.req.json();
+
+    if (!inscription_id) {
+      return c.json({ success: false, error: 'ID inscription requis' }, 400);
+    }
+
+    // Récupérer inscription + manifeste + profile
+    const inscription = await env.DB.prepare(`
+      SELECT i.*, m.theme, m.content, p.formule
+      FROM inscriptions i
+      LEFT JOIN manifestes m ON i.id = m.inscription_id
+      LEFT JOIN user_profiles p ON i.id = p.user_id
+      WHERE i.id = ?
+    `).bind(inscription_id).first();
+
+    if (!inscription) {
+      return c.json({ success: false, error: 'Inscription introuvable' }, 404);
+    }
+
+    // Générer mot de passe temporaire
+    const tempPassword = 'Welcome' + Math.random().toString(36).slice(-6) + '!';
+    const bcrypt = await import('bcryptjs');
+    const passwordHash = await bcrypt.hash(tempPassword, 10);
+
+    // Créer user
+    const userResult = await env.DB.prepare(`
+      INSERT INTO users (email, password_hash, role, status)
+      VALUES (?, ?, 'client', 'active')
+    `).bind(inscription.email, passwordHash).run();
+
+    const userId = userResult.meta.last_row_id;
+
+    // Update user_id dans inscription
+    await env.DB.prepare(`
+      UPDATE inscriptions SET user_id = ?, status = 'completed' WHERE id = ?
+    `).bind(userId, inscription_id).run();
+
+    // Update user_profiles
+    await env.DB.prepare(`
+      UPDATE user_profiles 
+      SET payment_status = 'paid', payment_date = datetime('now')
+      WHERE user_id = ?
+    `).bind(inscription_id).run();
+
+    // Attribution automatique Petek/Psaumes/Anges (utiliser la fonction existante)
+    // Pour l'instant, log uniquement
+    console.log(`Compte créé pour ${inscription.email} - Mot de passe temporaire: ${tempPassword}`);
+    console.log(`TODO: Attribuer Petek/Psaumes/Anges pour formule ${inscription.formule}`);
+
+    // TODO: Envoyer email avec identifiants
+
+    return c.json({ 
+      success: true, 
+      message: 'Paiement validé ! Compte créé avec succès.',
+      user_id: userId,
+      temp_password: tempPassword
+    });
+
+  } catch (error) {
+    console.error('Erreur validate-payment:', error);
+    return c.json({ success: false, error: 'Erreur serveur' }, 500);
+  }
+});
+
 // API Inscription - Créer une demande de rendez-vous
 app.post('/api/inscription', async (c) => {
   const { env } = c;
@@ -1117,111 +1253,75 @@ app.get('/api/inscriptions', async (c) => {
 })
 
 // Page Admin - Liste des inscriptions
+
 app.get('/admin', async (c) => {
   const { env } = c;
   
   try {
-    const { results } = await env.DB.prepare(
-      'SELECT * FROM inscriptions ORDER BY created_at DESC'
-    ).all();
+    // Récupérer toutes les inscriptions avec leurs données associées
+    const inscriptions = await env.DB.prepare(`
+      SELECT 
+        i.id,
+        i.prenom,
+        i.nom,
+        i.email,
+        i.tel,
+        i.status,
+        i.created_at,
+        m.theme,
+        r.date_rdv,
+        r.notes as rdv_notes
+      FROM inscriptions i
+      LEFT JOIN manifestes m ON i.id = m.inscription_id
+      LEFT JOIN rendez_vous r ON i.id = r.client_id
+      ORDER BY i.created_at DESC
+    `).all();
+
+    const results = inscriptions.results || [];
+
+    // Compter par status
+    const stats = {
+      total: results.length,
+      pending_appointment: results.filter(r => r.status === 'pending_appointment').length,
+      contacted: results.filter(r => r.status === 'contacted').length,
+      payment_pending: results.filter(r => r.status === 'payment_pending').length,
+      completed: results.filter(r => r.status === 'completed').length
+    };
 
     return c.html(`<!doctype html>
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Admin - Académie de la Lumière</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <title>Super Admin - Académie de la Lumière</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
-    :root{
-      --bg:#0a0a0f;
-      --text:#f0f0f2;
-      --muted:#b8aec9;
-      --accent:#b388eb;
-      --line: rgba(255,255,255,.08);
-    }
-    *{box-sizing:border-box}
-    body{
-      margin:0;
-      font-family: Inter, system-ui, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      padding: 40px 20px;
-    }
-    .container{max-width: 1200px; margin: 0 auto;}
-    h1{
-      font-size: 28px;
-      margin: 0 0 8px;
-      color: var(--accent);
-    }
-    .subtitle{
-      color: var(--muted);
-      margin-bottom: 30px;
-    }
-    .stats{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 16px;
-      margin-bottom: 30px;
-    }
-    .stat-card{
-      background: rgba(255,255,255,.02);
-      border: 1px solid var(--line);
-      border-radius: 12px;
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 100%);
+      color: #f0f0f2;
       padding: 20px;
+      min-height: 100vh;
     }
-    .stat-value{
+    .container { max-width: 1400px; margin: 0 auto; }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 32px;
+    }
+    h1 {
       font-size: 32px;
-      font-weight: 600;
-      color: var(--accent);
-      margin-bottom: 4px;
+      font-weight: 700;
+      color: #b388eb;
+      margin-bottom: 8px;
     }
-    .stat-label{
-      color: var(--muted);
-      font-size: 14px;
-    }
-    table{
-      width: 100%;
-      border-collapse: collapse;
-      background: rgba(255,255,255,.02);
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      overflow: hidden;
-    }
-    th, td{
-      padding: 14px;
-      text-align: left;
-      border-bottom: 1px solid var(--line);
-    }
-    th{
-      background: rgba(179,136,235,.1);
-      font-weight: 600;
-      font-size: 13px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--accent);
-    }
-    tr:last-child td{border-bottom: none}
-    tr:hover{background: rgba(255,255,255,.03)}
-    .status{
+    .subtitle { color: #b8aec9; font-size: 14px; }
+    .btn {
       display: inline-block;
-      padding: 4px 10px;
-      border-radius: 999px;
-      font-size: 12px;
-      font-weight: 500;
-    }
-    .status-pending{
-      background: rgba(255,193,7,.15);
-      color: #ffc107;
-    }
-    .status-contacted{
-      background: rgba(76,175,80,.15);
-      color: #4caf50;
-    }
-    .btn{
-      display: inline-block;
-      padding: 10px 16px;
-      background: var(--accent);
+      padding: 10px 20px;
+      background: #b388eb;
       color: #0a0a0f;
       border: none;
       border-radius: 8px;
@@ -1229,76 +1329,479 @@ app.get('/admin', async (c) => {
       font-weight: 600;
       text-decoration: none;
       cursor: pointer;
+      transition: opacity 0.3s;
+    }
+    .btn:hover { opacity: 0.9; }
+    .btn-small {
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+    .btn-success {
+      background: #4caf50;
+      color: white;
+    }
+    .btn-warning {
+      background: #ff9800;
+      color: white;
+    }
+    .btn-danger {
+      background: #f44336;
+      color: white;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+    .stat-card {
+      background: rgba(255,255,255,.05);
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .stat-value {
+      font-size: 36px;
+      font-weight: 700;
+      color: #b388eb;
+      margin-bottom: 4px;
+    }
+    .stat-label {
+      color: #b8aec9;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .filters {
+      background: rgba(255,255,255,.05);
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 24px;
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .filter-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .filter-group label {
+      font-size: 12px;
+      color: #b8aec9;
+      font-weight: 600;
+    }
+    select, input[type="text"] {
+      padding: 8px 12px;
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.15);
+      border-radius: 6px;
+      color: #f0f0f2;
+      font-size: 14px;
+      font-family: inherit;
+    }
+    select:focus, input:focus {
+      outline: none;
+      border-color: #b388eb;
+    }
+    .table-container {
+      background: rgba(255,255,255,.05);
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th, td {
+      padding: 14px;
+      text-align: left;
+      border-bottom: 1px solid rgba(255,255,255,.08);
+    }
+    th {
+      background: rgba(179,136,235,.15);
+      font-weight: 600;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #b388eb;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover { background: rgba(255,255,255,.03); }
+    .status {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .status-pending_appointment {
+      background: rgba(255,193,7,.15);
+      color: #ffc107;
+    }
+    .status-contacted {
+      background: rgba(33,150,243,.15);
+      color: #2196f3;
+    }
+    .status-payment_pending {
+      background: rgba(255,152,0,.15);
+      color: #ff9800;
+    }
+    .status-completed {
+      background: rgba(76,175,80,.15);
+      color: #4caf50;
+    }
+    .actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.8);
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .modal.active { display: flex; }
+    .modal-content {
+      background: #1a1a2e;
+      border-radius: 16px;
+      padding: 32px;
+      max-width: 500px;
+      width: 90%;
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+    .modal-title {
+      font-size: 24px;
+      font-weight: 700;
+      color: #b388eb;
+    }
+    .modal-close {
+      background: none;
+      border: none;
+      color: #b8aec9;
+      font-size: 24px;
+      cursor: pointer;
+      padding: 0;
+      width: 32px;
+      height: 32px;
+    }
+    .form-group {
       margin-bottom: 20px;
     }
-    .btn:hover{
-      opacity: 0.9;
+    .form-group label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #b8aec9;
+      margin-bottom: 8px;
     }
-    @media (max-width: 768px){
-      table{font-size: 13px}
-      th, td{padding: 10px}
+    .form-group input,
+    .form-group select {
+      width: 100%;
+    }
+    .alert {
+      padding: 12px 16px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      font-size: 14px;
+    }
+    .alert-success {
+      background: rgba(76,175,80,.15);
+      color: #4caf50;
+      border: 1px solid rgba(76,175,80,.3);
+    }
+    .alert-error {
+      background: rgba(244,67,54,.15);
+      color: #f44336;
+      border: 1px solid rgba(244,67,54,.3);
+    }
+    @media (max-width: 768px) {
+      table { font-size: 13px; }
+      th, td { padding: 10px; }
+      .stat-value { font-size: 28px; }
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>📊 Admin Dashboard</h1>
-    <p class="subtitle">Académie de la Lumière - Gestion des inscriptions</p>
-    
-    <div class="stats">
-      <div class="stat-card">
-        <div class="stat-value">${results.length}</div>
-        <div class="stat-label">Total inscriptions</div>
+    <div class="header">
+      <div>
+        <h1>🛡️ Super Admin Dashboard</h1>
+        <p class="subtitle">Gestion des inscriptions et validation des paiements</p>
       </div>
-      <div class="stat-card">
-        <div class="stat-value">${results.filter(r => r.status === 'pending').length}</div>
-        <div class="stat-label">En attente</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">${results.filter(r => r.status === 'contacted').length}</div>
-        <div class="stat-label">Contactés</div>
+      <div>
+        <a href="/" class="btn">← Accueil</a>
+        <a href="/login" class="btn" style="background: #4caf50;">Déconnexion</a>
       </div>
     </div>
 
-    <a href="/" class="btn">← Retour à l'accueil</a>
-    
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Nom</th>
-          <th>Email</th>
-          <th>Téléphone</th>
-          <th>Objectif</th>
-          <th>Date</th>
-          <th>Status</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${results.map(r => `
+    <div class="stats">
+      <div class="stat-card">
+        <div class="stat-value">${stats.total}</div>
+        <div class="stat-label">Total</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${stats.pending_appointment}</div>
+        <div class="stat-label">En attente RDV</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${stats.contacted}</div>
+        <div class="stat-label">Contactés</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${stats.payment_pending}</div>
+        <div class="stat-label">Paiement en attente</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${stats.completed}</div>
+        <div class="stat-label">Terminés</div>
+      </div>
+    </div>
+
+    <div class="filters">
+      <div class="filter-group">
+        <label>Filtrer par status</label>
+        <select id="filter-status">
+          <option value="">Tous</option>
+          <option value="pending_appointment">En attente RDV</option>
+          <option value="contacted">Contactés</option>
+          <option value="payment_pending">Paiement en attente</option>
+          <option value="completed">Terminés</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>Rechercher</label>
+        <input type="text" id="filter-search" placeholder="Nom, email...">
+      </div>
+    </div>
+
+    <div class="table-container">
+      <table id="inscriptions-table">
+        <thead>
           <tr>
-            <td>${r.id}</td>
-            <td>${r.prenom} ${r.nom}</td>
-            <td>${r.email}</td>
-            <td>${r.tel || '-'}</td>
-            <td>${r.objectif || '-'}</td>
-            <td>${new Date(r.created_at).toLocaleDateString('fr-FR')}</td>
-            <td><span class="status status-${r.status}">${r.status}</span></td>
-            <td><a href="/mon-parcours/${r.id}" class="btn" style="font-size: 12px; padding: 6px 12px;">Voir parcours</a></td>
+            <th>ID</th>
+            <th>Client</th>
+            <th>Thèmes</th>
+            <th>RDV</th>
+            <th>Status</th>
+            <th>Actions</th>
           </tr>
-        `).join('')}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          ${results.map(r => `
+            <tr data-status="${r.status}" data-search="${r.prenom} ${r.nom} ${r.email}">
+              <td>#${r.id}</td>
+              <td>
+                <strong>${r.prenom} ${r.nom}</strong><br>
+                <span style="font-size: 12px; color: #b8aec9;">${r.email}</span><br>
+                <span style="font-size: 12px; color: #b8aec9;">${r.tel || '-'}</span>
+              </td>
+              <td style="font-size: 13px; color: #b8aec9;">${r.theme || '-'}</td>
+              <td style="font-size: 13px;">
+                ${r.date_rdv ? `
+                  <strong>${r.date_rdv}</strong><br>
+                  <span style="font-size: 11px; color: #b8aec9;">${r.rdv_notes || ''}</span>
+                ` : '-'}
+              </td>
+              <td><span class="status status-${r.status}">${r.status}</span></td>
+              <td>
+                <div class="actions">
+                  ${r.status === 'pending_appointment' ? `
+                    <button class="btn btn-small btn-success" onclick="markContacted(${r.id})">
+                      Contacter
+                    </button>
+                  ` : ''}
+                  ${r.status === 'contacted' ? `
+                    <button class="btn btn-small btn-warning" onclick="openPaymentModal(${r.id}, '${r.prenom}', '${r.nom}')">
+                      Saisir paiement
+                    </button>
+                  ` : ''}
+                  ${r.status === 'payment_pending' ? `
+                    <button class="btn btn-small btn-success" onclick="validatePayment(${r.id})">
+                      Valider paiement
+                    </button>
+                  ` : ''}
+                  ${r.status === 'completed' ? `
+                    <a href="/mon-parcours/${r.id}" class="btn btn-small" target="_blank">
+                      Voir parcours
+                    </a>
+                  ` : ''}
+                </div>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
   </div>
+
+  <!-- Modal Saisie Paiement -->
+  <div id="payment-modal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title">💳 Saisir le paiement</h2>
+        <button class="modal-close" onclick="closePaymentModal()">×</button>
+      </div>
+      <div id="modal-alert"></div>
+      <form id="payment-form">
+        <input type="hidden" id="payment-inscription-id">
+        <div class="form-group">
+          <label>Client</label>
+          <input type="text" id="payment-client-name" disabled>
+        </div>
+        <div class="form-group">
+          <label>Formule choisie</label>
+          <select id="payment-formule" required>
+            <option value="">-- Sélectionner --</option>
+            <option value="essentiel">Petek Essentiel - 175€</option>
+            <option value="psaumes">Petek & Psaumes - 495€</option>
+            <option value="integral">Parcours Intégral - 1500€</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Montant payé (€)</label>
+          <input type="number" id="payment-amount" required min="0" step="1">
+        </div>
+        <div class="form-group">
+          <label>Lien de paiement envoyé</label>
+          <input type="url" id="payment-link" placeholder="https://...">
+        </div>
+        <button type="submit" class="btn" style="width: 100%;">
+          Enregistrer le paiement
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
+  <script>
+    // Filtres
+    document.getElementById('filter-status').addEventListener('change', filterTable);
+    document.getElementById('filter-search').addEventListener('input', filterTable);
+
+    function filterTable() {
+      const statusFilter = document.getElementById('filter-status').value;
+      const searchFilter = document.getElementById('filter-search').value.toLowerCase();
+      const rows = document.querySelectorAll('#inscriptions-table tbody tr');
+
+      rows.forEach(row => {
+        const status = row.getAttribute('data-status');
+        const searchText = row.getAttribute('data-search').toLowerCase();
+
+        const statusMatch = !statusFilter || status === statusFilter;
+        const searchMatch = !searchFilter || searchText.includes(searchFilter);
+
+        row.style.display = (statusMatch && searchMatch) ? '' : 'none';
+      });
+    }
+
+    // Marquer comme contacté
+    async function markContacted(id) {
+      if (!confirm('Marquer cette inscription comme contactée ?')) return;
+
+      try {
+        const response = await axios.post('/api/admin/mark-contacted', { inscription_id: id });
+        if (response.data.success) {
+          alert('✅ Status mis à jour !');
+          location.reload();
+        }
+      } catch (error) {
+        alert('❌ ' + (error.response?.data?.error || 'Erreur'));
+      }
+    }
+
+    // Modal paiement
+    function openPaymentModal(id, prenom, nom) {
+      document.getElementById('payment-inscription-id').value = id;
+      document.getElementById('payment-client-name').value = prenom + ' ' + nom;
+      document.getElementById('payment-modal').classList.add('active');
+    }
+
+    function closePaymentModal() {
+      document.getElementById('payment-modal').classList.remove('active');
+      document.getElementById('payment-form').reset();
+      document.getElementById('modal-alert').innerHTML = '';
+    }
+
+    // Soumettre paiement
+    document.getElementById('payment-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const formData = {
+        inscription_id: parseInt(document.getElementById('payment-inscription-id').value),
+        formule: document.getElementById('payment-formule').value,
+        amount: parseFloat(document.getElementById('payment-amount').value),
+        payment_link: document.getElementById('payment-link').value
+      };
+
+      try {
+        const response = await axios.post('/api/admin/record-payment', formData);
+        if (response.data.success) {
+          document.getElementById('modal-alert').innerHTML = 
+            '<div class="alert alert-success">✅ Paiement enregistré ! Le client peut maintenant payer.</div>';
+          setTimeout(() => {
+            closePaymentModal();
+            location.reload();
+          }, 2000);
+        }
+      } catch (error) {
+        document.getElementById('modal-alert').innerHTML = 
+          '<div class="alert alert-error">❌ ' + (error.response?.data?.error || 'Erreur') + '</div>';
+      }
+    });
+
+    // Valider paiement et créer compte
+    async function validatePayment(id) {
+      if (!confirm('Confirmer que le paiement a été reçu ? Cela va créer le compte utilisateur et attribuer le parcours.')) return;
+
+      try {
+        const response = await axios.post('/api/admin/validate-payment', { inscription_id: id });
+        if (response.data.success) {
+          alert('✅ Paiement validé ! Compte créé et parcours attribué.');
+          location.reload();
+        }
+      } catch (error) {
+        alert('❌ ' + (error.response?.data?.error || 'Erreur'));
+      }
+    }
+
+    // Auto-complétion montant selon formule
+    document.getElementById('payment-formule').addEventListener('change', (e) => {
+      const amounts = {
+        'essentiel': 175,
+        'psaumes': 495,
+        'integral': 1500
+      };
+      document.getElementById('payment-amount').value = amounts[e.target.value] || '';
+    });
+  </script>
 </body>
-</html>`)
+</html>`);
+
   } catch (error) {
     console.error('Erreur admin:', error);
-    return c.html('<h1>Erreur lors du chargement des données</h1>')
+    return c.html('<h1>Erreur lors du chargement du dashboard</h1>');
   }
 })
-
 // =============================================
 // INSCRIPTION PAGE
 // =============================================
