@@ -16,7 +16,7 @@
   // Variables d'environnement (définies dans .dev.vars pour le dev local)
   // Pour la production, utiliser: wrangler pages secret put RESEND_API_KEY
   "vars": {
-    "FROM_EMAIL": "noreply@meorly.com",
+    "FROM_EMAIL": "onboarding@resend.dev",
     "ADMIN_EMAIL": "admin@meorly.com"
   }
 }
