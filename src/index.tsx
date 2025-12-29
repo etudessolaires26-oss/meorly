@@ -2459,24 +2459,8 @@ app.get('/admin', async (c) => {
 
   <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
   <script>
-    // === FONCTIONS GLOBALES ===
+    // === FONCTIONS GLOBALES (DOIVENT ÊTRE DÉCLARÉES EN PREMIER) ===
     
-    function filterTable() {
-      const statusFilter = document.getElementById('filter-status').value;
-      const searchFilter = document.getElementById('filter-search').value.toLowerCase();
-      const rows = document.querySelectorAll('#inscriptions-table tbody tr');
-
-      rows.forEach(row => {
-        const status = row.getAttribute('data-status');
-        const searchText = row.getAttribute('data-search').toLowerCase();
-
-        const statusMatch = !statusFilter || status === statusFilter;
-        const searchMatch = !searchFilter || searchText.includes(searchFilter);
-
-        row.style.display = (statusMatch && searchMatch) ? '' : 'none';
-      });
-    }
-
     // Marquer comme contacté
     async function markContacted(id) {
       if (!confirm("Marquer cette inscription comme contactée ?")) return;
@@ -2525,7 +2509,7 @@ app.get('/admin', async (c) => {
       const ribText = document.getElementById('rib-info').value;
       
       if (!ribText.trim()) {
-        alert("⚠️ Veuillez d'abord remplir vos coordonnées bancaires");
+        alert("⚠️ Veuillez d\"abord remplir vos coordonnées bancaires");
         return;
       }
 
@@ -2539,8 +2523,24 @@ app.get('/admin', async (c) => {
           btn.textContent = originalText;
           btn.style.background = "";
         }, 2000);
-      }).catch(err => {
+      }).catch(() => {
         alert("Erreur lors de la copie. Veuillez copier manuellement.");
+      });
+    }
+    
+    function filterTable() {
+      const statusFilter = document.getElementById('filter-status').value;
+      const searchFilter = document.getElementById('filter-search').value.toLowerCase();
+      const rows = document.querySelectorAll('#inscriptions-table tbody tr');
+
+      rows.forEach(row => {
+        const status = row.getAttribute('data-status');
+        const searchText = row.getAttribute('data-search').toLowerCase();
+
+        const statusMatch = !statusFilter || status === statusFilter;
+        const searchMatch = !searchFilter || searchText.includes(searchFilter);
+
+        row.style.display = (statusMatch && searchMatch) ? '' : 'none';
       });
     }
 
