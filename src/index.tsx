@@ -2274,28 +2274,8 @@ app.get('/admin', async (c) => {
 
   <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
   <script>
-    // Charger RIB depuis localStorage au chargement
-    window.addEventListener('DOMContentLoaded', () => {
-      const savedRIB = localStorage.getItem('admin_rib_info');
-      if (savedRIB) {
-        document.getElementById('rib-info').value = savedRIB;
-      }
-    });
-
-    // Sauvegarder RIB automatiquement lors de la modification
-    document.addEventListener('DOMContentLoaded', () => {
-      const ribInput = document.getElementById('rib-info');
-      if (ribInput) {
-        ribInput.addEventListener('blur', () => {
-          localStorage.setItem('admin_rib_info', ribInput.value);
-        });
-      }
-    });
-
-    // Filtres
-    document.getElementById('filter-status').addEventListener('change', filterTable);
-    document.getElementById('filter-search').addEventListener('input', filterTable);
-
+    // === FONCTIONS GLOBALES ===
+    
     function filterTable() {
       const statusFilter = document.getElementById('filter-status').value;
       const searchFilter = document.getElementById('filter-search').value.toLowerCase();
@@ -2340,33 +2320,6 @@ app.get('/admin', async (c) => {
       document.getElementById('modal-alert').innerHTML = '';
     }
 
-    // Soumettre paiement
-    document.getElementById('payment-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-
-      const formData = {
-        inscription_id: parseInt(document.getElementById('payment-inscription-id').value),
-        formule: document.getElementById('payment-formule').value,
-        amount: parseFloat(document.getElementById('payment-amount').value),
-        payment_link: document.getElementById('payment-link').value
-      };
-
-      try {
-        const response = await axios.post('/api/admin/record-payment', formData);
-        if (response.data.success) {
-          document.getElementById('modal-alert').innerHTML = 
-            "<div class=\"alert alert-success\">✅ Paiement enregistré ! Le client peut maintenant payer.</div>";
-          setTimeout(() => {
-            closePaymentModal();
-            location.reload();
-          }, 2000);
-        }
-      } catch (error) {
-        document.getElementById('modal-alert').innerHTML = 
-          "<div class=\"alert alert-error\">❌ " + (error.response?.data?.error || "Erreur") + "</div>";
-      }
-    });
-
     // Valider paiement et créer compte
     async function validatePayment(id) {
       if (!confirm("Confirmer que le paiement a été reçu ? Cela va créer le compte utilisateur et attribuer le parcours.")) return;
@@ -2406,15 +2359,64 @@ app.get('/admin', async (c) => {
       });
     }
 
-    // Auto-complétion montant selon formule
-    document.getElementById('payment-formule').addEventListener('change', (e) => {
-      const amounts = {
-        'essentiel': 175,
-        'psaumes': 495,
-        'integral': 1500
-      };
-      document.getElementById('payment-amount').value = amounts[e.target.value] || '';
-    });
+    // === INITIALISATION AU CHARGEMENT ===
+    
+    document.addEventListener('DOMContentLoaded', () => {
+      // Charger RIB depuis localStorage
+      const savedRIB = localStorage.getItem('admin_rib_info');
+      if (savedRIB) {
+        document.getElementById('rib-info').value = savedRIB;
+      }
+
+      // Sauvegarder RIB automatiquement lors de la modification
+      const ribInput = document.getElementById('rib-info');
+      if (ribInput) {
+        ribInput.addEventListener('blur', () => {
+          localStorage.setItem('admin_rib_info', ribInput.value);
+        });
+      }
+
+      // Filtres
+      document.getElementById('filter-status').addEventListener('change', filterTable);
+      document.getElementById('filter-search').addEventListener('input', filterTable);
+
+      // Soumettre paiement
+      document.getElementById('payment-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const formData = {
+          inscription_id: parseInt(document.getElementById('payment-inscription-id').value),
+          formule: document.getElementById('payment-formule').value,
+          amount: parseFloat(document.getElementById('payment-amount').value),
+          payment_link: document.getElementById('payment-link').value
+        };
+
+        try {
+          const response = await axios.post('/api/admin/record-payment', formData);
+          if (response.data.success) {
+            document.getElementById('modal-alert').innerHTML = 
+              "<div class=\"alert alert-success\">✅ Paiement enregistré ! Le client peut maintenant payer.</div>";
+            setTimeout(() => {
+              closePaymentModal();
+              location.reload();
+            }, 2000);
+          }
+        } catch (error) {
+          document.getElementById('modal-alert').innerHTML = 
+            "<div class=\"alert alert-error\">❌ " + (error.response?.data?.error || "Erreur") + "</div>";
+        }
+      });
+
+      // Auto-complétion montant selon formule
+      document.getElementById('payment-formule').addEventListener('change', (e) => {
+        const amounts = {
+          'essentiel': 175,
+          'psaumes': 495,
+          'integral': 1500
+        };
+        document.getElementById('payment-amount').value = amounts[e.target.value] || '';
+      });
+    }); // Fin DOMContentLoaded
   </script>
 </body>
 </html>`);
