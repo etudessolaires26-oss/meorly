@@ -1444,6 +1444,8 @@ app.post('/api/rdv', async (c) => {
 
     // Envoyer l'email via Resend
     try {
+      const FROM_EMAIL = env.FROM_EMAIL || 'noreply@academie-lumiere.fr';
+      
       const resendResponse = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: {
@@ -1451,7 +1453,7 @@ app.post('/api/rdv', async (c) => {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          from: 'Académie de la Lumière <noreply@meorly.com>',
+          from: FROM_EMAIL,
           to: [inscription.email],
           subject: '✨ Confirmation de votre rendez-vous - Académie de la Lumière',
           text: emailBody
@@ -1618,6 +1620,8 @@ app.post('/api/admin/record-payment', async (c) => {
 
     // Envoyer l'email via Resend
     try {
+      const FROM_EMAIL = env.FROM_EMAIL || 'noreply@academie-lumiere.fr';
+      
       const resendResponse = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: {
@@ -1625,7 +1629,7 @@ app.post('/api/admin/record-payment', async (c) => {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          from: 'Académie de la Lumière <noreply@meorly.com>',
+          from: FROM_EMAIL,
           to: [inscriptionFull.email],
           subject: '💳 Votre parcours spirituel vous attend - Académie de la Lumière',
           text: emailBody
