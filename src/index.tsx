@@ -1658,24 +1658,55 @@ app.post('/api/admin/validate-payment', async (c) => {
     const formule = paymentInfo[0] || 'essentiel';
     const amount = parseFloat(paymentInfo[1]) || 175;
 
-    // Générer mot de passe temporaire
-    const tempPassword = 'Welcome' + Math.random().toString(36).slice(-6) + '!';
-    const bcrypt = await import('bcryptjs');
-    const passwordHash = await bcrypt.hash(tempPassword, 10);
+    // Vérifier si l'utilisateur existe déjà
+    const existingUser = await env.DB.prepare(`
+      SELECT id FROM users WHERE email = ?
+    `).bind(inscription.email).first();
 
-    // Créer user
-    const userResult = await env.DB.prepare(`
-      INSERT INTO users (email, password_hash, role, status)
-      VALUES (?, ?, 'client', 'active')
-    `).bind(inscription.email, passwordHash).run();
+    let userId;
+    let tempPassword = '';
 
-    const userId = userResult.meta.last_row_id;
+    if (existingUser) {
+      // L'utilisateur existe déjà, on le réutilise
+      userId = existingUser.id;
+      console.log(`⚠️ Utilisateur existant réutilisé: ${inscription.email} (ID: ${userId})`);
+    } else {
+      // Générer mot de passe temporaire
+      tempPassword = 'Welcome' + Math.random().toString(36).slice(-6) + '!';
+      const bcrypt = await import('bcryptjs');
+      const passwordHash = await bcrypt.hash(tempPassword, 10);
 
-    // Créer user_profile
-    await env.DB.prepare(`
-      INSERT INTO user_profiles (user_id, prenom, nom, tel, formule, formule_prix, payment_status, payment_date)
-      VALUES (?, ?, ?, ?, ?, ?, 'paid', datetime('now'))
-    `).bind(userId, inscription.prenom, inscription.nom, inscription.tel, formule, amount).run();
+      // Créer user
+      const userResult = await env.DB.prepare(`
+        INSERT INTO users (email, password_hash, role, status)
+        VALUES (?, ?, 'client', 'active')
+      `).bind(inscription.email, passwordHash).run();
+
+      userId = userResult.meta.last_row_id;
+      console.log(`✅ Nouvel utilisateur créé: ${inscription.email} (ID: ${userId})`);
+    }
+
+    // Créer ou mettre à jour user_profile
+    const existingProfile = await env.DB.prepare(`
+      SELECT user_id FROM user_profiles WHERE user_id = ?
+    `).bind(userId).first();
+
+    if (existingProfile) {
+      // Mettre à jour le profil existant
+      await env.DB.prepare(`
+        UPDATE user_profiles 
+        SET formule = ?, formule_prix = ?, payment_status = 'paid', payment_date = datetime('now')
+        WHERE user_id = ?
+      `).bind(formule, amount, userId).run();
+      console.log(`✅ Profil mis à jour pour user_id: ${userId}`);
+    } else {
+      // Créer un nouveau profil
+      await env.DB.prepare(`
+        INSERT INTO user_profiles (user_id, prenom, nom, tel, formule, formule_prix, payment_status, payment_date)
+        VALUES (?, ?, ?, ?, ?, ?, 'paid', datetime('now'))
+      `).bind(userId, inscription.prenom, inscription.nom, inscription.tel, formule, amount).run();
+      console.log(`✅ Nouveau profil créé pour user_id: ${userId}`);
+    }
 
     // Update user_id dans inscription
     await env.DB.prepare(`
