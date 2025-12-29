@@ -1499,31 +1499,37 @@ app.post('/api/admin/record-payment', async (c) => {
       return c.json({ success: false, error: 'Données incomplètes' }, 400);
     }
 
-    // Créer user_profile avec la formule
-    await env.DB.prepare(`
-      INSERT OR REPLACE INTO user_profiles (user_id, formule, formule_prix, payment_status)
-      VALUES (?, ?, ?, 'pending')
-    `).bind(inscription_id, formule, amount).run();
+    // Vérifier que l'inscription existe
+    const inscription = await env.DB.prepare(`
+      SELECT id FROM inscriptions WHERE id = ?
+    `).bind(inscription_id).first();
 
-    // Update status inscription
+    if (!inscription) {
+      return c.json({ success: false, error: 'Inscription introuvable' }, 404);
+    }
+
+    // Stocker les infos de paiement dans inscriptions (colonnes à ajouter si nécessaire)
+    // Pour l'instant, on stocke juste la formule dans le champ objectif temporairement
     await env.DB.prepare(`
       UPDATE inscriptions 
-      SET status = 'payment_pending'
+      SET status = 'payment_pending',
+          objectif = ?
       WHERE id = ?
-    `).bind(inscription_id).run();
+    `).bind(`${formule}|${amount}|${payment_link || ''}`, inscription_id).run();
 
-    // Log payment link si fourni
+    // Log payment link
+    console.log(`💳 Paiement enregistré pour inscription #${inscription_id}: ${formule} - ${amount}€`);
     if (payment_link) {
-      console.log(`Lien de paiement pour inscription ${inscription_id}: ${payment_link}`);
+      console.log(`   Lien: ${payment_link}`);
     }
 
     return c.json({ 
       success: true, 
-      message: 'Paiement enregistré. En attente du paiement client.' 
+      message: 'Paiement enregistré. En attente de validation.' 
     });
 
   } catch (error) {
-    console.error('Erreur record-payment:', error);
+    console.error('❌ Erreur record-payment:', error);
     return c.json({ success: false, error: 'Erreur serveur' }, 500);
   }
 });
@@ -1538,18 +1544,22 @@ app.post('/api/admin/validate-payment', async (c) => {
       return c.json({ success: false, error: 'ID inscription requis' }, 400);
     }
 
-    // Récupérer inscription + manifeste + profile
+    // Récupérer inscription + manifeste
     const inscription = await env.DB.prepare(`
-      SELECT i.*, m.theme, m.content, p.formule
+      SELECT i.*, m.theme, m.content
       FROM inscriptions i
       LEFT JOIN manifestes m ON i.id = m.inscription_id
-      LEFT JOIN user_profiles p ON i.id = p.user_id
       WHERE i.id = ?
     `).bind(inscription_id).first();
 
     if (!inscription) {
       return c.json({ success: false, error: 'Inscription introuvable' }, 404);
     }
+
+    // Extraire formule depuis objectif (format: "formule|montant|lien")
+    const paymentInfo = (inscription.objectif || '').split('|');
+    const formule = paymentInfo[0] || 'essentiel';
+    const amount = parseFloat(paymentInfo[1]) || 175;
 
     // Générer mot de passe temporaire
     const tempPassword = 'Welcome' + Math.random().toString(36).slice(-6) + '!';
@@ -1564,21 +1574,20 @@ app.post('/api/admin/validate-payment', async (c) => {
 
     const userId = userResult.meta.last_row_id;
 
+    // Créer user_profile
+    await env.DB.prepare(`
+      INSERT INTO user_profiles (user_id, prenom, nom, tel, formule, formule_prix, payment_status, payment_date)
+      VALUES (?, ?, ?, ?, ?, ?, 'paid', datetime('now'))
+    `).bind(userId, inscription.prenom, inscription.nom, inscription.tel, formule, amount).run();
+
     // Update user_id dans inscription
     await env.DB.prepare(`
       UPDATE inscriptions SET user_id = ?, status = 'completed' WHERE id = ?
     `).bind(userId, inscription_id).run();
 
-    // Update user_profiles
-    await env.DB.prepare(`
-      UPDATE user_profiles 
-      SET payment_status = 'paid', payment_date = datetime('now')
-      WHERE user_id = ?
-    `).bind(inscription_id).run();
-
     // Attribution automatique Petek/Psaumes/Anges
     console.log(`Compte créé pour ${inscription.email} - Mot de passe temporaire: ${tempPassword}`);
-    console.log(`Attribution du parcours pour formule: ${inscription.formule}`);
+    console.log(`Attribution du parcours pour formule: ${formule}`);
 
     // Analyser le manifeste pour extraire les thèmes
     const manifesteText = inscription.content || inscription.theme || 'paix';
@@ -1591,9 +1600,9 @@ app.post('/api/admin/validate-payment', async (c) => {
 
     // 2. Attribuer Psaumes selon la formule
     let psalmsCount = 1; // Par défaut
-    if (inscription.formule === 'psaumes') {
+    if (formule === 'psaumes') {
       psalmsCount = 3; // 3-5 Psaumes
-    } else if (inscription.formule === 'integral') {
+    } else if (formule === 'integral') {
       psalmsCount = 5; // Psaumes illimités (commencer avec 5)
     }
 
