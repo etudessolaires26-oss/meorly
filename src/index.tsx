@@ -1513,6 +1513,36 @@ app.post('/api/admin/mark-contacted', async (c) => {
   }
 });
 
+// API Admin: Supprimer une inscription
+app.post('/api/admin/delete-inscription', async (c) => {
+  const { env } = c;
+  try {
+    const { inscription_id } = await c.req.json();
+
+    if (!inscription_id) {
+      return c.json({ success: false, error: 'ID inscription requis' }, 400);
+    }
+
+    // Supprimer les données liées
+    await env.DB.prepare('DELETE FROM manifestes WHERE inscription_id = ?').bind(inscription_id).run();
+    await env.DB.prepare('DELETE FROM rendez_vous WHERE client_id = ?').bind(inscription_id).run();
+    await env.DB.prepare('DELETE FROM messages WHERE inscription_id = ?').bind(inscription_id).run();
+    await env.DB.prepare('DELETE FROM user_peteks WHERE inscription_id = ?').bind(inscription_id).run();
+    await env.DB.prepare('DELETE FROM user_psalms WHERE inscription_id = ?').bind(inscription_id).run();
+    await env.DB.prepare('DELETE FROM user_angels WHERE inscription_id = ?').bind(inscription_id).run();
+    
+    // Supprimer l'inscription
+    await env.DB.prepare('DELETE FROM inscriptions WHERE id = ?').bind(inscription_id).run();
+
+    console.log(`✅ Inscription #${inscription_id} supprimée`);
+    return c.json({ success: true, message: 'Inscription supprimée avec succès' });
+
+  } catch (error) {
+    console.error('Erreur delete-inscription:', error);
+    return c.json({ success: false, error: 'Erreur serveur' }, 500);
+  }
+});
+
 // API Admin: Enregistrer le paiement (formule + montant)
 app.post('/api/admin/record-payment', async (c) => {
   const { env } = c;
