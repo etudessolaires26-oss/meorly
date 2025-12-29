@@ -3739,34 +3739,34 @@ app.get('/questionnaire/:id', async (c) => {
     // Questions par thème
     const themeQuestions = {
       paix: {
-        icon: '🕊️',
-        title: 'Paix intérieure',
-        question: 'Qu\'est-ce qui perturbe votre paix intérieure actuellement ? Décrivez votre situation.'
+        icon: "🕊️",
+        title: "Paix intérieure",
+        question: "Qu'est-ce qui perturbe votre paix intérieure actuellement ? Décrivez votre situation."
       },
       amour: {
-        icon: '💝',
-        title: 'Amour & Relations',
-        question: 'Quelle relation souhaitez-vous améliorer ? (couple, famille, amitié...)'
+        icon: "💝",
+        title: "Amour & Relations",
+        question: "Quelle relation souhaitez-vous améliorer ? (couple, famille, amitié...)"
       },
       reussite: {
-        icon: '🌟',
-        title: 'Réussite & Abondance',
-        question: 'Quel projet ou objectif est important pour vous en ce moment ?'
+        icon: "🌟",
+        title: "Réussite & Abondance",
+        question: "Quel projet ou objectif est important pour vous en ce moment ?"
       },
       sante: {
-        icon: '💚',
-        title: 'Santé & Vitalité',
-        question: 'Comment vous sentez-vous physiquement et émotionnellement ? Quels défis rencontrez-vous ?'
+        icon: "💚",
+        title: "Santé & Vitalité",
+        question: "Comment vous sentez-vous physiquement et émotionnellement ? Quels défis rencontrez-vous ?"
       },
       protection: {
-        icon: '🛡️',
-        title: 'Protection & Sécurité',
-        question: 'De quoi souhaitez-vous être protégé(e) ? Qu\'est-ce qui vous inquiète ?'
+        icon: "🛡️",
+        title: "Protection & Sécurité",
+        question: "De quoi souhaitez-vous être protégé(e) ? Qu'est-ce qui vous inquiète ?"
       },
       sagesse: {
-        icon: '🔮',
-        title: 'Sagesse & Clarté',
-        question: 'Quelle décision ou choix vous préoccupe actuellement ?'
+        icon: "🔮",
+        title: "Sagesse & Clarté",
+        question: "Quelle décision ou choix vous préoccupe actuellement ?"
       }
     };
 
