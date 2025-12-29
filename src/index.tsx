@@ -1090,12 +1090,13 @@ app.post('/api/auth/login', async (c) => {
       }, 400);
     }
     
-    // Récupérer l'utilisateur
+    // Récupérer l'utilisateur + inscription_id
     const user = await env.DB.prepare(`
       SELECT u.id, u.email, u.password_hash, u.role, u.status,
-             p.prenom, p.nom
+             p.prenom, p.nom, i.id as inscription_id
       FROM users u
       LEFT JOIN user_profiles p ON u.id = p.user_id
+      LEFT JOIN inscriptions i ON u.id = i.user_id
       WHERE u.email = ?
     `).bind(email).first();
     
@@ -1145,7 +1146,8 @@ app.post('/api/auth/login', async (c) => {
         role: user.role,
         status: user.status,
         prenom: user.prenom,
-        nom: user.nom
+        nom: user.nom,
+        inscription_id: user.inscription_id
       }
     });
     
@@ -4726,7 +4728,13 @@ app.get('/login', (c) => {
           } else if (role === 'guide') {
             window.location.href = '/guide/dashboard';
           } else {
-            window.location.href = '/client/dashboard';
+            // Client : rediriger vers /mon-parcours avec inscription_id
+            const inscription_id = response.data.user.inscription_id;
+            if (inscription_id) {
+              window.location.href = '/mon-parcours/' + inscription_id;
+            } else {
+              alert('Erreur : Aucune inscription trouvée pour ce compte');
+            }
           }
         }
       } catch (error) {
