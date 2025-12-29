@@ -5092,42 +5092,57 @@ app.get('/mon-parcours/:inscription_id', async (c) => {
       return c.text('Utilisateur non trouvé', 404);
     }
 
-    // Récupérer le Petek
-    const petekResult = await env.DB.prepare(`
-      SELECT 
-        up.*,
-        pt.code, pt.theme, pt.theme_label,
-        pt.intent_fr, pt.reading_fr,
-        pt.practice, pt.guide_comment_fr,
-        pt.duration_recommended, pt.cycle_days
-      FROM user_peteks up
-      JOIN petek_templates pt ON up.petek_template_id = pt.id
-      WHERE up.inscription_id = ? AND up.status = 'active'
-      ORDER BY up.assigned_at DESC
-      LIMIT 1
-    `).bind(inscription_id).first();
+    // Récupérer le Petek (avec fallback si table vide)
+    let petekResult = null;
+    try {
+      petekResult = await env.DB.prepare(`
+        SELECT 
+          up.*,
+          pt.code, pt.theme, pt.theme_label,
+          pt.intent_fr, pt.reading_fr,
+          pt.practice, pt.guide_comment_fr,
+          pt.duration_recommended, pt.cycle_days
+        FROM user_peteks up
+        JOIN petek_templates pt ON up.petek_template_id = pt.id
+        WHERE up.inscription_id = ? AND up.status = 'active'
+        ORDER BY up.assigned_at DESC
+        LIMIT 1
+      `).bind(inscription_id).first();
+    } catch (e) {
+      console.log('Petek non trouvé:', e);
+    }
 
-    // Récupérer les Psaumes
-    const psalmsResult = await env.DB.prepare(`
-      SELECT 
-        p.number, p.title_fr, p.full_text_fr, p.theme, p.duration_min, p.guide_comment
-      FROM user_psalms up
-      JOIN psalms p ON up.psalm_id = p.id
-      WHERE up.inscription_id = ? AND up.status = 'active'
-      ORDER BY up.assigned_at DESC
-      LIMIT 3
-    `).bind(inscription_id).all();
+    // Récupérer les Psaumes (avec fallback si table vide)
+    let psalmsResult = { results: [] };
+    try {
+      psalmsResult = await env.DB.prepare(`
+        SELECT 
+          p.number, p.title_fr, p.full_text_fr, p.theme, p.duration_min, p.guide_comment
+        FROM user_psalms up
+        JOIN psalms p ON up.psalm_id = p.id
+        WHERE up.inscription_id = ? AND up.status = 'active'
+        ORDER BY up.assigned_at DESC
+        LIMIT 3
+      `).bind(inscription_id).all();
+    } catch (e) {
+      console.log('Psaumes non trouvés:', e);
+    }
 
-    // Récupérer les Anges
-    const angelsResult = await env.DB.prepare(`
-      SELECT 
-        a.slug, a.name_fr, a.name_he, a.description_fr,
-        ua.rank_assigned
-      FROM user_angels ua
-      JOIN angels a ON ua.angel_id = a.id
-      WHERE ua.inscription_id = ?
-      ORDER BY ua.rank_assigned ASC
-    `).bind(inscription_id).all();
+    // Récupérer les Anges (avec fallback si table vide)
+    let angelsResult = { results: [] };
+    try {
+      angelsResult = await env.DB.prepare(`
+        SELECT 
+          a.slug, a.name_fr, a.name_he, a.description_fr,
+          ua.rank_assigned
+        FROM user_angels ua
+        JOIN angels a ON ua.angel_id = a.id
+        WHERE ua.inscription_id = ?
+        ORDER BY ua.rank_assigned ASC
+      `).bind(inscription_id).all();
+    } catch (e) {
+      console.log('Anges non trouvés:', e);
+    }
 
     const petek = petekResult || null;
     const psalms = psalmsResult.results || [];
