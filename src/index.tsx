@@ -291,7 +291,7 @@ async function sendEmail(
 ): Promise<boolean> {
   try {
     const RESEND_API_KEY = env.RESEND_API_KEY;
-    const FROM_EMAIL = env.FROM_EMAIL || 'noreply@academie-lumiere.fr';
+    const FROM_EMAIL = env.FROM_EMAIL || 'Académie de la Lumière <onboarding@resend.dev>';
 
     if (!RESEND_API_KEY) {
       console.error('❌ RESEND_API_KEY non configurée');
@@ -1444,7 +1444,7 @@ app.post('/api/rdv', async (c) => {
 
     // Envoyer l'email via Resend
     try {
-      const FROM_EMAIL = env.FROM_EMAIL || 'noreply@academie-lumiere.fr';
+      const FROM_EMAIL = env.FROM_EMAIL || 'Académie de la Lumière <onboarding@resend.dev>';
       
       const resendResponse = await fetch('https://api.resend.com/emails', {
         method: 'POST',
@@ -1620,7 +1620,7 @@ app.post('/api/admin/record-payment', async (c) => {
 
     // Envoyer l'email via Resend
     try {
-      const FROM_EMAIL = env.FROM_EMAIL || 'noreply@academie-lumiere.fr';
+      const FROM_EMAIL = env.FROM_EMAIL || 'Académie de la Lumière <onboarding@resend.dev>';
       
       const resendResponse = await fetch('https://api.resend.com/emails', {
         method: 'POST',
