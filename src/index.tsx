@@ -3793,7 +3793,7 @@ app.get('/questionnaire/:id', async (c) => {
         }
 
         // Update counter
-        themeCounter.textContent = selected.length + ' thème(s) sélectionné(s) (maximum 2)';
+        themeCounter.textContent = selected.length + " thème(s) sélectionné(s) (maximum 2)";
         
         // Enable/disable button
         nextBtn.disabled = selected.length === 0;
@@ -3841,7 +3841,7 @@ app.get('/questionnaire/:id', async (c) => {
       });
 
       submitBtn.disabled = true;
-      submitBtn.textContent = 'Enregistrement...';
+      submitBtn.textContent = "Enregistrement...";
 
       try {
         const response = await axios.post('/api/questionnaire', {
@@ -3855,12 +3855,12 @@ app.get('/questionnaire/:id', async (c) => {
           window.location.href = '/rdv/' + inscriptionId;
         }
       } catch (error) {
-        message.className = 'message error';
-        message.style.display = 'block';
-        message.textContent = '❌ ' + (error.response?.data?.error || 'Erreur lors de l\'enregistrement');
+        message.className = "message error";
+        message.style.display = "block";
+        message.textContent = "❌ " + (error.response?.data?.error || "Erreur lors de l'enregistrement");
         
         submitBtn.disabled = false;
-        submitBtn.textContent = 'Valider mon questionnaire';
+        submitBtn.textContent = "Valider mon questionnaire";
       }
     });
   </script>
