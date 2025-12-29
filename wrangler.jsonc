@@ -15,9 +15,9 @@
   ],
   // Variables d'environnement (définies dans .dev.vars pour le dev local)
   // Pour la production, utiliser: wrangler pages secret put RESEND_API_KEY
-  // NOTE: Utiliser academielumiere26@gmail.com temporairement (compte test Resend)
+  // NOTE: Utiliser onboarding@resend.dev (domaine vérifié par Resend)
   "vars": {
-    "FROM_EMAIL": "academielumiere26@gmail.com",
+    "FROM_EMAIL": "onboarding@resend.dev",
     "ADMIN_EMAIL": "admin@meorly.com"
   }
 }
