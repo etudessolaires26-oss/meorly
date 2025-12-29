@@ -3808,19 +3808,13 @@ app.get('/questionnaire/:id', async (c) => {
       // Générer les questions dynamiques
       questionsContainer.innerHTML = selectedThemes.map(theme => {
         const q = themeQuestions[theme];
-        return \`
-          <div class="question-group">
-            <label class="question-label">
-              <span class="theme-icon">\${q.icon}</span>
-              \${q.title} : \${q.question}
-            </label>
-            <textarea 
-              name="question_\${theme}" 
-              required 
-              placeholder="Partagez votre expérience..."
-            ></textarea>
-          </div>
-        \`;
+        return '<div class="question-group">' +
+          '<label class="question-label">' +
+            '<span class="theme-icon">' + q.icon + '</span>' +
+            q.title + ' : ' + q.question +
+          '</label>' +
+          '<textarea name="question_' + theme + '" required placeholder="Partagez votre expérience..."></textarea>' +
+        '</div>';
       }).join('');
 
       step1.classList.add('hidden');
@@ -3842,7 +3836,7 @@ app.get('/questionnaire/:id', async (c) => {
 
       const responses = {};
       selectedThemes.forEach(theme => {
-        const textarea = document.querySelector(\`textarea[name="question_\${theme}"]\`);
+        const textarea = document.querySelector('textarea[name="question_' + theme + '"]');
         responses[theme] = textarea.value;
       });
 
