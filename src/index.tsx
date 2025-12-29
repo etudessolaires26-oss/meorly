@@ -1429,7 +1429,7 @@ app.post('/api/rdv', async (c) => {
       inscription.theme + '\n\n' +
       'PROCHAINES ÉTAPES\n' +
       '━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
-      'Un de nos guides va vous contacter dans les 24-48h pour confirmer l\'horaire exact et préparer votre premier entretien gratuit.\n\n' +
+      'Votre guide sera à votre disposition pour discuter des projets qui vous préoccupent et vous orienter vers le bon chemin.\n\n' +
       'Ce premier entretien de 45 minutes nous permettra de :\n' +
       '• Comprendre vos besoins spirituels\n' +
       '• Discuter de votre manifeste personnel\n' +
@@ -1442,9 +1442,33 @@ app.post('/api/rdv', async (c) => {
       'Old City, Jerusalem, Israel';
 
 
-    // TODO: Intégrer un service d'email (SendGrid, Resend, etc.)
-    // Pour l'instant, on log l'email
-    console.log('EMAIL DE CONFIRMATION:', emailBody);
+    // Envoyer l'email via Resend
+    try {
+      const resendResponse = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${env.RESEND_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          from: 'Académie de la Lumière <noreply@meorly.com>',
+          to: [inscription.email],
+          subject: '✨ Confirmation de votre rendez-vous - Académie de la Lumière',
+          text: emailBody
+        })
+      });
+
+      const resendData = await resendResponse.json();
+      
+      if (!resendResponse.ok) {
+        console.error('Erreur envoi email Resend:', resendData);
+      } else {
+        console.log('✅ Email de confirmation envoyé:', resendData);
+      }
+    } catch (emailError) {
+      console.error('Erreur lors de l\'envoi de l\'email:', emailError);
+      // On continue même si l'email échoue
+    }
 
     return c.json({
       success: true,
@@ -1517,6 +1541,79 @@ app.post('/api/admin/record-payment', async (c) => {
       WHERE id = ?
     `).bind(`${formule}|${amount}|${payment_link || ''}`, inscription_id).run();
 
+    // Récupérer les infos complètes de l'inscription
+    const inscriptionFull = await env.DB.prepare(`
+      SELECT prenom, nom, email FROM inscriptions WHERE id = ?
+    `).bind(inscription_id).first();
+
+    // Préparer l'email de demande de paiement
+    const formuleLabels = {
+      'essentiel': 'Petek Essentiel - 175€',
+      'psaumes': 'Petek & Psaumes - 495€',
+      'integral': 'Parcours Intégral - 1500€'
+    };
+
+    const emailBody = `Bonjour ${inscriptionFull.prenom},\n\n` +
+      `Suite à notre entretien, nous avons le plaisir de vous proposer le parcours suivant :\n\n` +
+      `VOTRE PARCOURS SPIRITUEL\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `📦 Formule : ${formuleLabels[formule] || formule}\n` +
+      `💰 Montant : ${amount}€\n\n` +
+      (payment_link ? 
+        `PAIEMENT EN LIGNE (STRIPE)\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `🔗 Lien de paiement sécurisé :\n${payment_link}\n\n` +
+        `Cliquez sur le lien ci-dessus pour procéder au paiement sécurisé par carte bancaire.\n\n` 
+        : 
+        `PAIEMENT PAR VIREMENT BANCAIRE\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `Titulaire : Académie de la Lumière\n` +
+        `IBAN : FR76 XXXX XXXX XXXX XXXX XXXX XXX\n` +
+        `BIC : XXXXXXXX\n` +
+        `Banque : Crédit Agricole\n` +
+        `Référence : Inscription #${inscription_id}\n\n` +
+        `⚠️ Important : Indiquez bien la référence dans votre virement.\n\n`
+      ) +
+      `PROCHAINES ÉTAPES\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `1. Effectuez le paiement via le lien ci-dessus ou par virement\n` +
+      `2. Une fois le paiement reçu, nous validerons votre compte\n` +
+      `3. Vous recevrez un email avec vos identifiants d'accès à votre espace personnel\n` +
+      `4. Votre parcours spirituel de 21 jours commencera immédiatement\n\n` +
+      `Nous sommes impatients de vous accompagner dans cette aventure spirituelle ! 🙏\n\n` +
+      `L'équipe de l'Académie de la Lumière\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `Western Wall Plaza, Jewish Quarter\n` +
+      `Old City, Jerusalem, Israel`;
+
+    // Envoyer l'email via Resend
+    try {
+      const resendResponse = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${env.RESEND_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          from: 'Académie de la Lumière <noreply@meorly.com>',
+          to: [inscriptionFull.email],
+          subject: '💳 Votre parcours spirituel vous attend - Académie de la Lumière',
+          text: emailBody
+        })
+      });
+
+      const resendData = await resendResponse.json();
+      
+      if (!resendResponse.ok) {
+        console.error('Erreur envoi email Resend:', resendData);
+      } else {
+        console.log('✅ Email de demande de paiement envoyé:', resendData);
+      }
+    } catch (emailError) {
+      console.error('Erreur lors de l\'envoi de l\'email:', emailError);
+      // On continue même si l'email échoue
+    }
+
     // Log payment link
     console.log(`💳 Paiement enregistré pour inscription #${inscription_id}: ${formule} - ${amount}€`);
     if (payment_link) {
@@ -1525,7 +1622,7 @@ app.post('/api/admin/record-payment', async (c) => {
 
     return c.json({ 
       success: true, 
-      message: 'Paiement enregistré. En attente de validation.' 
+      message: 'Paiement enregistré. Email envoyé au client.' 
     });
 
   } catch (error) {
@@ -1661,7 +1758,7 @@ app.post('/api/admin/validate-payment', async (c) => {
             </div>
 
             <center>
-              <a href="https://3000-ijdjdyk7wwphujd5fn2kw-02b9cc79.sandbox.novita.ai/login" class="button">
+              <a href="https://meorly.pages.dev/login" class="button">
                 Se connecter maintenant
               </a>
             </center>
@@ -1675,7 +1772,7 @@ app.post('/api/admin/validate-payment', async (c) => {
               <li>Commencez votre parcours spirituel</li>
             </ol>
 
-            <p>Un guide va vous contacter prochainement pour planifier vos entretiens individuels.</p>
+            <p>Votre parcours spirituel de 21 jours commence maintenant. 25 minutes par jour pendant 21 jours vous permettront de suivre votre rituel quotidien. Un guide sera à votre disposition via le chat pour répondre à vos questions.</p>
 
             <div class="footer">
               <p>© ${new Date().getFullYear()} Académie de la Lumière</p>
