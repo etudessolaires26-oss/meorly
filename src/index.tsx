@@ -2314,16 +2314,16 @@ app.get('/admin', async (c) => {
 
     // Marquer comme contacté
     async function markContacted(id) {
-      if (!confirm('Marquer cette inscription comme contactée ?')) return;
+      if (!confirm("Marquer cette inscription comme contactée ?")) return;
 
       try {
         const response = await axios.post('/api/admin/mark-contacted', { inscription_id: id });
         if (response.data.success) {
-          alert('✅ Status mis à jour !');
+          alert("✅ Status mis à jour !");
           location.reload();
         }
       } catch (error) {
-        alert('❌ ' + (error.response?.data?.error || 'Erreur'));
+        alert("❌ " + (error.response?.data?.error || "Erreur"));
       }
     }
 
@@ -2355,7 +2355,7 @@ app.get('/admin', async (c) => {
         const response = await axios.post('/api/admin/record-payment', formData);
         if (response.data.success) {
           document.getElementById('modal-alert').innerHTML = 
-            '<div class="alert alert-success">✅ Paiement enregistré ! Le client peut maintenant payer.</div>';
+            "<div class=\"alert alert-success\">✅ Paiement enregistré ! Le client peut maintenant payer.</div>";
           setTimeout(() => {
             closePaymentModal();
             location.reload();
@@ -2363,22 +2363,22 @@ app.get('/admin', async (c) => {
         }
       } catch (error) {
         document.getElementById('modal-alert').innerHTML = 
-          '<div class="alert alert-error">❌ ' + (error.response?.data?.error || 'Erreur') + '</div>';
+          "<div class=\"alert alert-error\">❌ " + (error.response?.data?.error || "Erreur") + "</div>";
       }
     });
 
     // Valider paiement et créer compte
     async function validatePayment(id) {
-      if (!confirm('Confirmer que le paiement a été reçu ? Cela va créer le compte utilisateur et attribuer le parcours.')) return;
+      if (!confirm("Confirmer que le paiement a été reçu ? Cela va créer le compte utilisateur et attribuer le parcours.")) return;
 
       try {
         const response = await axios.post('/api/admin/validate-payment', { inscription_id: id });
         if (response.data.success) {
-          alert('✅ Paiement validé ! Compte créé et parcours attribué.');
+          alert("✅ Paiement validé ! Compte créé et parcours attribué.");
           location.reload();
         }
       } catch (error) {
-        alert('❌ ' + (error.response?.data?.error || 'Erreur'));
+        alert("❌ " + (error.response?.data?.error || "Erreur"));
       }
     }
 
@@ -2387,22 +2387,22 @@ app.get('/admin', async (c) => {
       const ribText = document.getElementById('rib-info').value;
       
       if (!ribText.trim()) {
-        alert('⚠️ Veuillez d\'abord remplir vos coordonnées bancaires');
+        alert("⚠️ Veuillez d'abord remplir vos coordonnées bancaires");
         return;
       }
 
       navigator.clipboard.writeText(ribText).then(() => {
         const btn = event.target;
         const originalText = btn.textContent;
-        btn.textContent = '✅ Copié !';
-        btn.style.background = '#4caf50';
+        btn.textContent = "✅ Copié !";
+        btn.style.background = "#4caf50";
         
         setTimeout(() => {
           btn.textContent = originalText;
-          btn.style.background = '';
+          btn.style.background = "";
         }, 2000);
       }).catch(err => {
-        alert('Erreur lors de la copie. Veuillez copier manuellement.');
+        alert("Erreur lors de la copie. Veuillez copier manuellement.");
       });
     }
 
