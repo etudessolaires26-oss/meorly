@@ -1723,8 +1723,19 @@ app.post('/api/admin/validate-payment', async (c) => {
     console.log(`Thèmes détectés: ${keywords.join(', ')}`);
 
     // 1. Attribuer Petek
-    const petek = await assignPetekToUser(env.DB, inscription_id, keywords);
-    console.log(`✅ Petek attribué: ${petek.code} - ${petek.theme}`);
+    let petek = null;
+    try {
+      petek = await assignPetekToUser(env.DB, inscription_id, keywords);
+      console.log(`✅ Petek attribué: ${petek.code} - ${petek.theme}`);
+    } catch (error) {
+      console.warn(`⚠️ Impossible d'attribuer Petek:`, error);
+      // Créer un Petek par défaut temporaire
+      petek = {
+        code: 'TEMP001',
+        theme: 'En attente d\'attribution',
+        description: 'Votre Petek personnalisé sera attribué prochainement par votre guide.'
+      };
+    }
 
     // 2. Attribuer Psaumes selon la formule
     let psalmsCount = 1; // Par défaut
@@ -1734,12 +1745,24 @@ app.post('/api/admin/validate-payment', async (c) => {
       psalmsCount = 5; // Psaumes illimités (commencer avec 5)
     }
 
-    const psalms = await assignPsalmsToUser(env.DB, inscription_id, keywords);
-    console.log(`✅ ${psalms.length} Psaume(s) attribué(s)`);
+    let psalms = [];
+    try {
+      psalms = await assignPsalmsToUser(env.DB, inscription_id, keywords);
+      console.log(`✅ ${psalms.length} Psaume(s) attribué(s)`);
+    } catch (error) {
+      console.warn(`⚠️ Impossible d'attribuer Psaumes:`, error);
+      psalms = [];
+    }
 
     // 3. Attribuer Anges (2 anges protecteurs)
-    const angels = await assignAngelsToUser(env.DB, inscription_id, keywords);
-    console.log(`✅ ${angels.length} Ange(s) attribué(s)`);
+    let angels = [];
+    try {
+      angels = await assignAngelsToUser(env.DB, inscription_id, keywords);
+      console.log(`✅ ${angels.length} Ange(s) attribué(s)`);
+    } catch (error) {
+      console.warn(`⚠️ Impossible d'attribuer Anges:`, error);
+      angels = [];
+    }
 
     // 4. Envoyer email avec identifiants
     const emailHtml = `
@@ -1782,10 +1805,10 @@ app.post('/api/admin/validate-payment', async (c) => {
 
             <div class="attribution">
               <h3>🎁 Votre parcours spirituel personnalisé</h3>
-              <div class="attribution-item">📿 <strong>Petek :</strong> ${petek.code} - ${petek.theme}</div>
-              <div class="attribution-item">📖 <strong>Psaumes :</strong> ${psalms.length} Psaume(s) attribué(s)</div>
-              <div class="attribution-item">👼 <strong>Anges protecteurs :</strong> ${angels.length} Ange(s) attribué(s)</div>
-              <div class="attribution-item">💎 <strong>Formule :</strong> ${inscription.formule === 'essentiel' ? 'Petek Essentiel' : inscription.formule === 'psaumes' ? 'Petek & Psaumes' : 'Parcours Intégral'}</div>
+              <div class="attribution-item">📿 <strong>Petek :</strong> ${petek ? `${petek.code} - ${petek.theme}` : 'En attente d\'attribution par votre guide'}</div>
+              <div class="attribution-item">📖 <strong>Psaumes :</strong> ${psalms.length > 0 ? `${psalms.length} Psaume(s) attribué(s)` : 'En attente d\'attribution'}</div>
+              <div class="attribution-item">👼 <strong>Anges protecteurs :</strong> ${angels.length > 0 ? `${angels.length} Ange(s) attribué(s)` : 'En attente d\'attribution'}</div>
+              <div class="attribution-item">💎 <strong>Formule :</strong> ${formule === 'essentiel' ? 'Petek Essentiel' : formule === 'psaumes' ? 'Petek & Psaumes' : 'Parcours Intégral'}</div>
             </div>
 
             <center>
@@ -1832,10 +1855,10 @@ app.post('/api/admin/validate-payment', async (c) => {
       success: true, 
       message: 'Paiement validé ! Compte créé et parcours attribué avec succès.',
       user_id: userId,
-      temp_password: tempPassword,
+      temp_password: tempPassword || 'Utilisateur existant',
       email_sent: emailSent,
       attribution: {
-        petek: petek.code,
+        petek: petek ? petek.code : 'En attente',
         psalms_count: psalms.length,
         angels_count: angels.length
       }
